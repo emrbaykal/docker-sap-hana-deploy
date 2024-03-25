@@ -19,25 +19,6 @@ services:
         max_attempts: 3
     extra_hosts:
       - gatewayhost:$HOST_IP
-  nfs-server:
-    image: itsthenetwork/nfs-server-alpine:latest
-    container_name: nfs-server
-    profiles: ["nfs"]
-    environment:
-       gateway_host_ip: $HOST_IP
-       SHARED_DIRECTORY: /nfsshare
-    volumes:
-      - ./web/html/media/:/nfsshare
-    networks:
-      - ansible-net
-    ports:
-      - 2049:2049
-    deploy:
-      restart_policy:
-        condition: on-failure
-        max_attempts: 3
-    extra_hosts:
-      - gatewayhost:$HOST_IP
   sles-ansible:
     image: emrebaykal/ansible-sles:latest
     container_name: ansible-sles
