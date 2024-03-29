@@ -1,0 +1,134 @@
+#!/bin/bash
+# Function to start docker service, check its status, and execute docker compose with given profile
+
+start_docker_compose() {
+    echo "Starting Docker service..."
+    sudo systemctl start docker
+
+    if [ "$1" = "redhat" ] || [ "$1" = "suse" ]; then
+        case "$1" in
+            "redhat")
+                start_redhat_docker_compose
+                ;;
+            "suse")
+                start_suse_docker_compose
+                ;;
+        esac
+    else
+        echo "Invalid argument. Usage: $0 start [redhat|suse]"
+    fi
+}
+
+# Function to start redhat  Docker Compose services
+start_redhat_docker_compose() {
+    if [ $(sudo systemctl is-active docker) = "active" ]; then
+       echo "Docker service is running."
+       echo "Executing 'docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile redhat up -d'..."
+       docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile redhat up -d
+       echo "Redhat Docker Compose services have been started."
+       echo ""
+       show_docker_compose_status
+    else
+	echo ""
+        echo "Docker service is not running. Please check the service status."
+    fi
+}
+
+# Function to start suse Docker Compose services
+start_suse_docker_compose() {
+    if [ $(sudo systemctl is-active docker) = "active" ]; then
+       echo "Docker service is running."
+       echo "Executing 'docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile suse up -d'..."
+       docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile suse up -d
+       echo "Suse Docker Compose services have been started."
+       echo ""
+       show_docker_compose_status
+    else
+        echo ""
+        echo "Docker service is not running. Please check the service status."
+    fi
+}
+
+stop_docker_compose() {
+
+    if [ "$1" = "redhat" ] || [ "$1" = "suse" ]; then
+        case "$1" in
+            "redhat")
+                stop_redhat_docker_compose
+                ;;
+            "suse")
+                stop_suse_docker_compose
+                ;;
+        esac
+    else
+        echo "Invalid argument. Usage: $0 start [redhat|suse]"
+    fi
+}
+
+
+# Function to stop Redhat Docker Compose services
+stop_redhat_docker_compose() {
+    echo "Stopping Redhat Docker Compose services..."
+    docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile redhat down
+    echo "Redhat Docker Compose services have been stopped."
+}
+
+# Function to stop Redhat Docker Compose services
+stop_suse_docker_compose() {
+    echo "Stopping Suse Docker Compose services..."
+    docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile suse down
+    echo "Suse Docker Compose services have been stopped."
+}
+
+# Function to show Docker Compose status
+show_docker_compose_status() {
+    echo "Showing Docker Compose status..."
+    echo ""
+    docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml ps
+}
+
+display_help() {
+    echo "Usage: $0 action [redhat|suse]"
+    echo "action:"
+    echo "    start   Start Docker Compose Services For the Given Profile."
+    echo "    stop    Stop Docker Compose Services For the Given Profile."
+    echo "    status  Show Docker Compose Status."
+    echo "    help    Display Help Message."
+    echo "profile:"
+    echo "    redhat  Start/Stop Docker Redhat Compose services."
+    echo "    suse    Start/Stop Docker Suse Compose services."
+}
+
+# Check if a specific function is provided as a command line argument
+if [ $# -eq 2 ]; then
+    ACTION=$1
+    PROFILE=$2
+
+    case "$ACTION" in
+        "start")
+            start_docker_compose $PROFILE
+            ;;
+        "stop")
+            stop_docker_compose $PROFILE
+            ;;
+        *)
+            echo "Invalid action. Usage: appliance [start|stop] [redhat|suse]"
+            ;;
+    esac
+elif [ $# -eq 1 ]; then
+    ACTION=$1
+
+    case "$ACTION" in
+        "status")
+            show_docker_compose_status
+            ;;
+        "help")
+            display_help
+            ;;
+        *)
+            echo "Invalid or incomplete command. For help: appliance help"
+            ;;
+    esac
+else
+    echo "Incorrect usage. For help: applicance help"
+fi
