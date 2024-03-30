@@ -30,6 +30,9 @@ COPY host-ip.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
+# Change Home Directory
+RUN echo "cd /root/ansible" >> /root/.bashrc
+
 # Start SSH Service
 RUN service ssh start
 
