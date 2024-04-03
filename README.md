@@ -28,5 +28,3 @@ To deploy the services:
 ```bash
 docker-compose --profile suse up -d
 docker-compose --profile redhat up -d
-docker-compose --profile web up -d
-docker-compose --profile nfs up -d
