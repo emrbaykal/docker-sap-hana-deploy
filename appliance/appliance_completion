@@ -1,0 +1,36 @@
+#!/bin/bash
+
+_appliance_completion() {
+    local cur prev actions profiles
+
+    # The current word being typed (cur) and the previous word (prev)
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    # Define possible actions and profiles
+    actions="start stop connect status help"
+    profiles="redhat suse"
+
+    # Completion logic
+    if [[ ${COMP_CWORD} == 1 ]] ; then
+        # If typing the first argument, suggest actions
+        COMPREPLY=($(compgen -W "${actions}" -- ${cur}))
+    elif [[ ${COMP_CWORD} == 2 ]] ; then
+        case "${prev}" in
+            start|stop|connect)
+                # If the previous word was an action that uses a profile, suggest profiles
+                COMPREPLY=($(compgen -W "${profiles}" -- ${cur}))
+                ;;
+            *)
+                COMPREPLY=()
+                ;;
+        esac
+    else
+        COMPREPLY=()
+    fi
+}
+
+# Attach the completion function to the appliance.sh script
+complete -F _appliance_completion appliance
+
+#/usr/local/bin/appliance
