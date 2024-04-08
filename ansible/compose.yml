@@ -19,29 +19,6 @@ services:
         max_attempts: 3
     extra_hosts:
       - gatewayhost:$HOST_IP
-  nfs-server:
-    image: erichough/nfs-server:latest
-    container_name: nfs-server
-    privileged: true
-    profiles: ["nfs","suse","redhat","web"]
-    environment:
-       gateway_host_ip: $HOST_IP
-       NFS_EXPORT_0: '/nfsshare                  *(ro,no_subtree_check)'
-    volumes:
-      - ./web/html/media/:/nfsshare
-    networks:
-      - ansible-net
-    ports:
-      - 2049:2049/udp
-      - 111:111/udp
-      - 32765:32765/udp
-      - 32767:32767/udp
-    deploy:
-      restart_policy:
-        condition: on-failure
-        max_attempts: 3
-    extra_hosts:
-      - gatewayhost:$HOST_IP
   sles-ansible:
     image: emrebaykal/ansible-sles:latest
     container_name: ansible-sles
@@ -53,6 +30,7 @@ services:
     volumes:
       - ansible-vol-sles:/root/ansible
       - ./web/html/media/:/root/media
+      - ./host-csv/suse/:/root/ansible/host-vms-csv
     networks:
       - ansible-net
     deploy:
@@ -61,7 +39,6 @@ services:
         max_attempts: 3
     depends_on:
       - web-server
-      - nfs-server
     extra_hosts:
       - gatewayhost:$HOST_IP
   rhel-ansible:
@@ -75,6 +52,7 @@ services:
     volumes:
       - ansible-vol-rhel:/root/ansible
       - ./web/html/media/:/root/media
+      - ./host-csv/redhat/:/root/ansible/host-vms-csv
     networks:
       - ansible-net
     deploy:
@@ -83,7 +61,6 @@ services:
         max_attempts: 3
     depends_on:
       - web-server
-      - nfs-server
     extra_hosts:
       - gatewayhost:$HOST_IP
 volumes:

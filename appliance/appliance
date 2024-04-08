@@ -5,36 +5,48 @@ start_docker_compose() {
     echo "Starting Docker service..."
     sudo systemctl start docker
 
-    if [ $(sudo systemctl is-active docker) = "active" ]; then
+    echo "Starting nfs service..."
+    sudo systemctl start nfs-kernel-server
+
+    if [ $(sudo systemctl is-active docker) = "active" ] && [ $(sudo systemctl is-active nfs-kernel-server) = "active" ]; then
        if [ "$1" = "redhat" ] || [ "$1" = "suse" ]; then
-           echo "Docker service is running."
+           echo "Docker & nfs-kernel-server services are running..."
+	   echo ""
            echo "Executing 'docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile $1 up -d'..."
            docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile $1 up -d
-           echo "$1 Docker Compose services have been started."
+           echo "Docker Compose $1 services have been started."
            echo ""
            show_docker_compose_status
+	   echo ""
        else
            echo "Invalid argument. Usage: appliance start [redhat|suse]"
        fi
-    else
-        echo ""
-        echo "Docker service is not running. Please check the service status."
+    else 
+        if [ $(sudo systemctl is-active docker) = "inactive" ]; then
+	  echo ""
+          echo "Docker service is not running. Please check the service status."
+	fi
+	if [ $(sudo systemctl is-active nfs-kernel-server) = "inactive" ]; then
+          echo ""
+          echo "nfs-kernel-server service is not running. Please check the service status."
+        fi
     fi
 }
 
 stop_docker_compose() {
-
     if [ "$1" = "redhat" ] || [ "$1" = "suse" ]; then
            echo "Stopping $1 Docker Compose services..."
            docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml --profile $1 down
-           echo "$1 Docker Compose services have been stopped."
+	   echo ""
+           echo "Docker Compose $1 services have been stopped..."
+	   sudo systemctl stop nfs-kernel-server
+           echo "nfs-kernel-server service has been stopped..."
     else
         echo "Invalid argument. Usage: appliance stop [redhat|suse]"
     fi
 }
 
 connect_docker_compose() {
-
     if [ "$1" = "redhat" ] || [ "$1" = "suse" ]; then
         case "$1" in
             "redhat")
@@ -53,8 +65,7 @@ connect_docker_compose() {
 
 # Function to show Docker Compose status
 show_docker_compose_status() {
-    echo "Showing Docker Compose status..."
-    echo ""
+    echo "Docker Compose Service Status..."
     docker compose --file /home/hpe/docker-sap-hana-deploy/ansible/compose.yml ps
 }
 
