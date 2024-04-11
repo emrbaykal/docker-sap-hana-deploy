@@ -3,7 +3,7 @@ services:
   web-server:
     image: nginx
     container_name: web-server
-    profiles: ["suse", "redhat", "web","nfs"]
+    profiles: ["suse", "redhat", "web"]
     ports:
       - "80:80"
     environment:
@@ -19,7 +19,7 @@ services:
         max_attempts: 3
     extra_hosts:
       - gatewayhost:$HOST_IP
-  sles-ansible:
+  suse-ansible:
     image: emrebaykal/ansible-sles:latest
     container_name: ansible-sles
     profiles: ["suse"]
@@ -41,7 +41,7 @@ services:
       - web-server
     extra_hosts:
       - gatewayhost:$HOST_IP
-  rhel-ansible:
+  redhat-ansible:
     image: emrebaykal/ansible-rhel:latest
     container_name: ansible-rhel
     profiles: ["redhat"]
