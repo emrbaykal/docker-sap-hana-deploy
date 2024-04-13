@@ -171,7 +171,7 @@ printf "#-----------------------------------------------------------------------
 printf "#                    HPE SAP HANA DEPLOYMENT APPLIANCE                         #\\n"
 printf "#                                                                              #\\n"
 printf "# If you encounter any situation, please contact CEEMA GSD Value Department.   #\\n"
-printf "# Build Number: 29032024-V2.0                                                  #\\n"
+printf "# Build Number: 11042024-V2.0                                                  #\\n"
 printf "# Author: Emre Baykal                                                          #\\n"
 printf "# Mail To: trtsasm@hpe.com                                                     #\\n"
 printf "# %-76s #\\n" ""

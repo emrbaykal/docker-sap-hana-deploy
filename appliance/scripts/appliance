@@ -1,50 +1,55 @@
 #!/bin/bash
 # Function to start docker service, check its status, and execute docker compose with given profile
-COMPOSE_FILE="/home/hpe/docker-sap-hana-deploy/ansible/compose.yml" 
+COMPOSE_FILE="/home/hpe/docker-sap-hana-deploy/appliance/compose.yml" 
 
 start_docker_compose() {
-    profile=$1
-
-    if [ "$profile" = "redhat" ] || [ "$profile" = "suse" ]; then
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
       ensure_service_running "docker"
       ensure_service_running "nfs-kernel-server"
 
       echo "Docker & nfs-kernel-server services are running..."
       #Check Docker Compose Service
-      container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$profile-ansible" -q )
+      container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
       if [ ! "$container_ids" ]; then
 	 echo ""
-         echo "Executing 'docker compose --file $COMPOSE_FILE --profile $profile up -d'..."
-         docker compose --file $COMPOSE_FILE --profile $profile up -d
-         echo "Docker Compose $profile services have been started."
+         echo "Executing 'docker compose --file $COMPOSE_FILE --profile $PROFILE up -d'..."
+         docker compose --file $COMPOSE_FILE --profile $PROFILE up -d
+
+	 sleep 3
+	 container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+         if [ ! "$container_ids" ]; then
+          echo "Failed to start Docker Compose $PROFILE services. Exiting."
+          return 1
+         fi
+
+         echo "Docker Compose $PROFILE services have been started."
          echo ""
          show_docker_compose_status
          echo ""
+
       else
-         echo "Docker Compose $profile services already running...."
+         echo "Docker Compose $PROFILE services already running...."
          fi
     else
        echo "Invalid argument. Usage: appliance start [redhat|suse]"
-       exit 1
+       return 2
     fi
-
+    return 0
 }
 
 stop_docker_compose() {
-    profile=$1
-
-    if [ "$profile" = "redhat" ] || [ "$profile" = "suse" ]; then
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
          #Check Docker Compose Service
-         container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$profile-ansible" -q )  
+         container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )  
 
          if [ "$container_ids" ]; then
-            read -p "Are you sure you want to stop Docker Compose services for $profile? (y/n) " choice
+            read -p "Are you sure you want to stop Docker Compose services for $PROFILE ? (y/n) " choice
 	    case "$choice" in
                 y|Y )
-                   echo "Stopping $1 Docker Compose services..."
-	           docker compose --file $COMPOSE_FILE --profile $profile down
+                   echo "Stopping $PROFILE Docker Compose services..."
+	           docker compose --file $COMPOSE_FILE --profile $PROFILE down
                    echo ""
-                   echo "Docker Compose $profile services have been stopped..."
+                   echo "Docker Compose $PROFILE services have been stopped..."
                    if is_service_running nfs-kernel-server; then
                     sudo systemctl stop nfs-kernel-server
                     echo "nfs-kernel-server service has been stopped..."
@@ -59,45 +64,46 @@ stop_docker_compose() {
                ;;
             esac
 	 else
-             echo "Docker Compose $profile services not running...."
+             echo "Docker Compose $PROFILE services not running...."
+	     return 1
            fi   
        else
            echo "Invalid argument. Usage: appliance stop [redhat|suse]"
-	   exit 1
+	   return 2
        fi
+       return 0
 }
 
 connect_docker_compose() {
-    profile=$1
-
-    if [ "$profile" = "redhat" ] || [ "$profile" = "suse" ]; then
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
 	#Check Docker Compose Service
-        container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$profile-ansible" -q )
+        container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
 
         if [ "$container_ids" ]; then
-           case "$profile" in
+           case "$PROFILE" in
                "redhat")
                    echo "Connecting Redhat Docker Compose services..."
-                   docker exec -it ansible-rhel /bin/bash
+                   docker exec -it ansible-redhat /bin/bash
                    ;;
                "suse")
                    echo "Connecting Suse Docker Compose services..."
-                   docker exec -it ansible-sles /bin/bash
+                   docker exec -it ansible-suse /bin/bash
                    ;;
            esac
         else
-             echo "Docker Compose $profile services not running...."
+             echo "Docker Compose $PROFILE services not running...."
+	     return 1
            fi
     else
         echo "Invalid argument. Usage: appliance connect [redhat|suse]"
-	exit 1
+	return 2
     fi
+    return 0
 }
 
 # Function to show Docker Compose status
 show_docker_compose_status() {
     echo "Docker Compose Service Status..."
-    #docker compose --file $COMPOSE_FILE ps --all
     docker compose --file $COMPOSE_FILE ps --format "table {{.Name}}\t{{.Service}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}"
 }
 
@@ -118,11 +124,41 @@ ensure_service_running() {
 }
 
 cleanup_on_exit() {
-  echo "Script terminated. Performing cleanup..."
-  docker-compose --file "$COMPOSE_FILE" --profile $profile down
-  if is_service_running "nfs-kernel-server"; then
-     sudo systemctl stop nfs-kernel-server
-  fi
+if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
+    read -p "Are you sure you want to Cleaning Up Docker  Comapose Service Resources for $PROFILE ? (y/n) " choice
+    case "$choice" in
+    y|Y )
+	 container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+         if [ "$container_ids" ]; then
+              echo "Stopping $PROFILE Docker Compose services..."
+              docker compose --file $COMPOSE_FILE --profile $PROFILE down
+              echo ""
+              echo "Docker Compose $PROFILE services have been stopped..."
+              if is_service_running nfs-kernel-server; then
+                    sudo systemctl stop nfs-kernel-server
+                    echo "nfs-kernel-server service has been stopped..."
+              fi
+         fi
+	 echo ""
+         echo "Performing cleanup $PROFILE Docker Compose services..."
+         docker volume rm "sap-hana-deploy_ansible-vol-$PROFILE"
+	 echo "Remove orphaned networks"
+         docker network prune -f
+	 echo ""
+    ;;
+    n|N )
+        echo "Stop operation cancelled."
+        return  # Exit the function
+    ;;
+       * )
+         echo "Invalid input"
+    ;;
+    esac
+ else
+   echo "Invalid argument. Usage: appliance stop [redhat|suse]"
+   return 2
+ fi
+   return 0
 }
 
 display_help() {
@@ -132,13 +168,12 @@ display_help() {
     echo "    stop    Stop Docker Compose Services For the Given Profile."
     echo "    connect Connect Docker Compose Services For the Given Profile."
     echo "    status  Show Docker Compose Status."
+    echo "    cleanup Cleaning up  Docker Compose Service Resources."
     echo "    help    Display Help Message."
     echo "profile:"
     echo "    redhat  Start/Stop Docker Redhat Compose services."
     echo "    suse    Start/Stop Docker Suse Compose services."
 }
-
-trap cleanup_on_exit SIGINT SIGTERM
 
 # Check if a specific function is provided as a command line argument
 if [ $# -eq 2 ]; then
@@ -153,6 +188,9 @@ if [ $# -eq 2 ]; then
             ;;
 	"connect")
             connect_docker_compose $PROFILE
+            ;;
+	"cleanup")
+            cleanup_on_exit $PROFILE
             ;;
         *)
             echo "Invalid action..."

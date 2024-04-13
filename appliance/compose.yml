@@ -21,14 +21,14 @@ services:
       - gatewayhost:$HOST_IP
   suse-ansible:
     image: emrebaykal/ansible-sles:latest
-    container_name: ansible-sles
+    container_name: ansible-suse
     profiles: ["suse"]
     ports:
       - "2222:22"
     environment:
       gateway_host_ip: $HOST_IP
     volumes:
-      - ansible-vol-sles:/root/ansible
+      - ansible-vol-suse:/root/ansible
       - ./web/html/media/:/root/media
       - ./host-csv/suse/:/root/ansible/host-vms-csv
     networks:
@@ -43,14 +43,14 @@ services:
       - gatewayhost:$HOST_IP
   redhat-ansible:
     image: emrebaykal/ansible-rhel:latest
-    container_name: ansible-rhel
+    container_name: ansible-redhat
     profiles: ["redhat"]
     ports:
       - "2224:22"
     environment:
       gateway_host_ip: $HOST_IP
     volumes:
-      - ansible-vol-rhel:/root/ansible
+      - ansible-vol-redhat:/root/ansible
       - ./web/html/media/:/root/media
       - ./host-csv/redhat/:/root/ansible/host-vms-csv
     networks:
@@ -64,7 +64,7 @@ services:
     extra_hosts:
       - gatewayhost:$HOST_IP
 volumes:
-  ansible-vol-sles:
-  ansible-vol-rhel:
+  ansible-vol-suse:
+  ansible-vol-redhat:
 networks:
   ansible-net: {}
