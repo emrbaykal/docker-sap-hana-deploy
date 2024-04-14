@@ -210,5 +210,5 @@ echo
 
 welcome_message
 
-sed -i '/\/home\/hpe\/docker-sap-hana-deploy\/appliance\/net-apply\.sh/d' /home/hpe/.bashrc
+sed -i '/\/home\/hpe\/docker-sap-hana-deploy\/appliance\/scripts\/net-apply\.sh/d' /home/hpe/.bashrc
 
