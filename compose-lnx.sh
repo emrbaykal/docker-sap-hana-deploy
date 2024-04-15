@@ -10,9 +10,8 @@ COMPOSE_FILE="$current_dir/appliance/compose.yml"
 start_docker_compose() {
     if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
       ensure_service_running "docker"
-      ensure_service_running "nfs-kernel-server"
 
-      echo "Docker & nfs-kernel-server services are running..."
+      echo "Docker services are running..."
       #Check Docker Compose Service
       container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
       if [ ! "$container_ids" ]; then
@@ -55,10 +54,6 @@ stop_docker_compose() {
 	           docker compose --file $COMPOSE_FILE --profile $PROFILE down
                    echo ""
                    echo "Docker Compose $PROFILE services have been stopped..."
-                   if is_service_running nfs-kernel-server; then
-                    sudo systemctl stop nfs-kernel-server
-                    echo "nfs-kernel-server service has been stopped..."
-	           fi
                ;;
                n|N )
                  echo "Stop operation cancelled."
@@ -139,10 +134,6 @@ if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
               docker compose --file $COMPOSE_FILE --profile $PROFILE down
               echo ""
               echo "Docker Compose $PROFILE services have been stopped..."
-              if is_service_running nfs-kernel-server; then
-                    sudo systemctl stop nfs-kernel-server
-                    echo "nfs-kernel-server service has been stopped..."
-              fi
          fi
 	 echo ""
          echo "Performing cleanup $PROFILE Docker Compose services..."
@@ -160,14 +151,14 @@ if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
     ;;
     esac
  else
-   echo "Invalid argument. Usage: appliance stop [redhat|suse]"
+   echo "Invalid argument. Usage: compose-lnx.sh stop [redhat|suse]"
    return 2
  fi
    return 0
 }
 
 display_help() {
-    echo "Usage: appliance action [redhat|suse]"
+    echo "Usage: compose-lnx.sh action [redhat|suse]"
     echo "action:"
     echo "    start   Start Docker Compose Services For the Given Profile."
     echo "    stop    Stop Docker Compose Services For the Given Profile."
