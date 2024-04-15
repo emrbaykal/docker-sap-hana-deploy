@@ -103,6 +103,8 @@ connect_docker_compose() {
 
 # Function to show Docker Compose status
 show_docker_compose_status() {
+    ensure_service_running "docker"
+    
     echo "Docker Compose Service Status..."
     docker compose --file $COMPOSE_FILE ps --format "table {{.Name}}\t{{.Service}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}"
 }
