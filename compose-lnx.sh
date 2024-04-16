@@ -4,12 +4,13 @@ export HOST_IP=$(hostname -I | awk '{print $1}')
 
 #Working Directory
 current_dir=$(pwd)
-
 COMPOSE_FILE="$current_dir/appliance/compose.yml"
+export_dir="$current_dir/appliance/web/html/media"
 
 start_docker_compose() {
     if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
       ensure_service_running "docker"
+      enable_nfs_share
 
       echo "Docker services are running..."
       #Check Docker Compose Service
@@ -104,7 +105,7 @@ connect_docker_compose() {
 # Function to show Docker Compose status
 show_docker_compose_status() {
     ensure_service_running "docker"
-    
+
     echo "Docker Compose Service Status..."
     docker compose --file $COMPOSE_FILE ps --format "table {{.Name}}\t{{.Service}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}"
 }
@@ -123,6 +124,24 @@ ensure_service_running() {
             exit 1
         fi
     fi
+}
+
+enable_nfs_share() {
+    nfs_package="rpm -q nfs-utils"
+    if [ "$nfs_package" ]; then
+       ensure_service_running "nfs-server"
+       ensure_service_running "rpcbind"
+
+       # Check if the entry exists in /etc/exports
+       if ! grep -q "$export_dir" /etc/exports; then
+          echo "$export_dir *(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+          echo "Entry added to /etc/exports"
+          sudo systemctl restart nfs-server
+          echo "NFS service restarted"
+	  echo "Export NFS Share"
+	  sudo exportfs -r
+      fi
+   fi
 }
 
 cleanup_on_exit() {
