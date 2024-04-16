@@ -1,19 +1,14 @@
 #!/bin/bash
 # Function to start docker service, check its status, and execute docker compose with given profile
-export HOST_IP=$(hostname -I | awk '{print $1}')
+export HOST_IP=$(ifconfig en0 | grep inet | grep -v inet6 | awk '{print $2}')
 
 #Working Directory
 current_dir=$(pwd)
-COMPOSE_FILE="$current_dir/appliance/compose.yml"
-export_dir="$current_dir/appliance/web/html/media"
+COMPOSE_FILE="./appliance/compose.yml"
 
 start_docker_compose() {
     if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
-      ensure_service_running "docker"
-      enable_nfs_share
 
-      echo "Docker services are running..."
-      #Check Docker Compose Service
       container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
       if [ ! "$container_ids" ]; then
 	 echo ""
@@ -28,8 +23,6 @@ start_docker_compose() {
          fi
 
          echo "Docker Compose $PROFILE services have been started."
-         echo ""
-         show_docker_compose_status
          echo ""
 
       else
@@ -102,81 +95,6 @@ connect_docker_compose() {
     return 0
 }
 
-# Function to show Docker Compose status
-show_docker_compose_status() {
-    ensure_service_running "docker"
-
-    echo "Docker Compose Service Status..."
-    docker compose --file $COMPOSE_FILE ps --format "table {{.Name}}\t{{.Service}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}"
-}
-
-# Helper function for cleaner service checks
-is_service_running() {
-    [[ $(sudo systemctl is-active $1) == "active" ]]
-}
-
-ensure_service_running() {
-    if ! is_service_running "$1"; then
-        echo "Starting $1..."
-        sudo systemctl start "$1"
-        if ! is_service_running "$1"; then
-            echo "Failed to start $1. Exiting."
-            exit 1
-        fi
-    fi
-}
-
-enable_nfs_share() {
-    nfs_package="rpm -q nfs-utils"
-    if [ "$nfs_package" ]; then
-       ensure_service_running "nfs-server"
-       ensure_service_running "rpcbind"
-
-       # Check if the entry exists in /etc/exports
-       if ! grep -q "$export_dir" /etc/exports; then
-          echo "$export_dir *(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
-          echo "Entry added to /etc/exports"
-          sudo systemctl restart nfs-server
-          echo "NFS service restarted"
-	  echo "Export NFS Share"
-	  sudo exportfs -r
-      fi
-   fi
-}
-
-cleanup_on_exit() {
-if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
-    read -p "Are you sure you want to Cleaning Up Docker  Comapose Service Resources for $PROFILE ? (y/n) " choice
-    case "$choice" in
-    y|Y )
-	 container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
-         if [ "$container_ids" ]; then
-              echo "Stopping $PROFILE Docker Compose services..."
-              docker compose --file $COMPOSE_FILE --profile $PROFILE down
-              echo ""
-              echo "Docker Compose $PROFILE services have been stopped..."
-         fi
-	 echo ""
-         echo "Performing cleanup $PROFILE Docker Compose services..."
-         docker volume rm "sap-hana-deploy_ansible-vol-$PROFILE"
-	 echo "Remove orphaned networks"
-         docker network prune -f
-	 echo ""
-    ;;
-    n|N )
-        echo "Stop operation cancelled."
-        return  # Exit the function
-    ;;
-       * )
-         echo "Invalid input"
-    ;;
-    esac
- else
-   echo "Invalid argument. Usage: compose-lnx.sh stop [redhat|suse]"
-   return 2
- fi
-   return 0
-}
 
 display_help() {
     echo "Usage: compose-lnx.sh action [redhat|suse]"
@@ -184,8 +102,6 @@ display_help() {
     echo "    start   Start Docker Compose Services For the Given Profile."
     echo "    stop    Stop Docker Compose Services For the Given Profile."
     echo "    connect Connect Docker Compose Services For the Given Profile."
-    echo "    status  Show Docker Compose Status."
-    echo "    cleanup Cleaning up  Docker Compose Service Resources."
     echo "    help    Display Help Message."
     echo "profile:"
     echo "    redhat  Start/Stop Docker Redhat Compose services."
@@ -206,9 +122,6 @@ if [ $# -eq 2 ]; then
 	"connect")
             connect_docker_compose $PROFILE
             ;;
-	"cleanup")
-            cleanup_on_exit $PROFILE
-            ;;
         *)
             echo "Invalid action..."
 	    echo ""
@@ -218,9 +131,6 @@ if [ $# -eq 2 ]; then
 elif [ $# -eq 1 ]; then
     ACTION=$1
     case "$ACTION" in
-        "status")
-            show_docker_compose_status
-            ;;
         "help")
             display_help
             ;;
