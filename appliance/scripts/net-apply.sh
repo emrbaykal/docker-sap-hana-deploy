@@ -1,214 +1,240 @@
 #!/bin/bash
+# Function to start docker service, check its status, and execute docker compose with given profile
+export HOST_IP=$(hostname -I | awk '{print $1}')
 
-# Function to validate IP addresses with CIDR notation
-validate_ip_cidr() {
-  local ip_cidr="$1"
-  local ip="${ip_cidr%/*}"
-  local cidr="${ip_cidr#*/}"
+#Working Directory
+current_dir=$(pwd)
+COMPOSE_FILE="$current_dir/appliance/compose.yml"
+export_dir="$current_dir/appliance/web/html/media"
 
-  # Validate the IP part
-  if ! [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "false"
-    return
-  fi
+start_docker_compose() {
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
+      ensure_service_running "docker"
+      enable_nfs_share
 
-  IFS='.' read -ra ip_parts <<< "$ip"
-  for i in "${ip_parts[@]}"; do
-    if ((i < 0 || i > 255)); then
-      echo "false"
-      return
-    fi
-  done
+      echo "Docker services are running..."
+      #Check Docker Compose Service
+      container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+      if [ ! "$container_ids" ]; then
+	 echo ""
+         echo "Executing 'docker compose --file $COMPOSE_FILE --profile $PROFILE up -d'..."
+         docker compose --file $COMPOSE_FILE --profile $PROFILE up -d
 
-  # Validate the CIDR part
-  if ! [[ $cidr =~ ^[0-9]+$ ]] || ((cidr < 0 || cidr > 32)); then
-    echo "false"
-    return
-  fi
+	 sleep 3
+	 container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+         if [ ! "$container_ids" ]; then
+          echo "Failed to start Docker Compose $PROFILE services. Exiting."
+          return 1
+         fi
 
-  echo "true"
-}
+         echo "Docker Compose $PROFILE services have been started."
+         echo ""
+         show_docker_compose_status
+         echo ""
 
-# Function to prompt for IP address in CIDR notation and validate it
-prompt_for_ip_cidr() {
-  while true; do
-    read -p "IP Address (e.x: 10.254.254.12/24): " ipaddress
-    if [[ $(validate_ip_cidr "$ipaddress") == "true" ]]; then
-      break
+      else
+         echo "Docker Compose $PROFILE services already running...."
+         fi
     else
-      echo "Invalid IP address format. Please try again."
+       echo "Invalid argument. Usage: appliance start [redhat|suse]"
+       return 2
     fi
-  done
+    return 0
 }
 
-# Function to prompt for gateway and validate it
-prompt_for_gateway() {
-  while true; do
-    read -p "Gateway (e.x: 10.254.254.1)       : " gateway
-    if [[ $(validate_ip_cidr "$gateway/32") == "true" ]]; then
-      break
+stop_docker_compose() {
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
+         #Check Docker Compose Service
+         container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+
+         if [ "$container_ids" ]; then
+            read -p "Are you sure you want to stop Docker Compose services for $PROFILE ? (y/n) " choice
+	    case "$choice" in
+                y|Y )
+                   echo "Stopping $PROFILE Docker Compose services..."
+	           docker compose --file $COMPOSE_FILE --profile $PROFILE down
+                   echo ""
+                   echo "Docker Compose $PROFILE services have been stopped..."
+               ;;
+               n|N )
+                 echo "Stop operation cancelled."
+                 return  # Exit the function
+               ;;
+               * )
+                 echo "Invalid input"
+               ;;
+            esac
+	 else
+             echo "Docker Compose $PROFILE services not running...."
+	     return 1
+           fi
+       else
+           echo "Invalid argument. Usage: appliance stop [redhat|suse]"
+	   return 2
+       fi
+       return 0
+}
+
+connect_docker_compose() {
+    if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
+	#Check Docker Compose Service
+        container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+
+        if [ "$container_ids" ]; then
+           case "$PROFILE" in
+               "redhat")
+                   echo "Connecting Redhat Docker Compose services..."
+                   docker exec -it ansible-redhat /bin/bash
+                   ;;
+               "suse")
+                   echo "Connecting Suse Docker Compose services..."
+                   docker exec -it ansible-suse /bin/bash
+                   ;;
+           esac
+        else
+             echo "Docker Compose $PROFILE services not running...."
+	     return 1
+           fi
     else
-      echo "Invalid gateway format. Please try again."
+        echo "Invalid argument. Usage: appliance connect [redhat|suse]"
+	return 2
     fi
-  done
+    return 0
 }
 
-# Function to prompt for DNS server and validate it
-prompt_for_dns() {
-  while true; do
-    read -p "Name Server (e.x: 10.254.254.10)  : " nameserver
-    if [[ $(validate_ip_cidr "$nameserver/32") == "true" ]]; then
-      read -p "Search  (e.x: hpetrlab.local)     : " search
-      break
-    else
-      echo "Invalid DNS server format. Please try again."
-    fi
-  done
+# Function to show Docker Compose status
+show_docker_compose_status() {
+    ensure_service_running "docker"
+
+    echo "Docker Compose Service Status..."
+    docker compose --file $COMPOSE_FILE ps --format "table {{.Name}}\t{{.Service}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}"
 }
 
-# Function to prompt for network configuration choice
-prompt_for_network_config() {
-  while true; do
-    read -p "Do you want to configure a static IP or use DHCP? (static/dhcp): " network_config
-    echo
-    case "$network_config" in
-      static)
-	echo "Please enter appliance static network configuration..."
-        prompt_for_ip_cidr
-        prompt_for_gateway
-        prompt_for_dns
-        configure_static
-        break
-        ;;
-      dhcp)
-        configure_dhcp
-        break
-        ;;
-      *)
-        echo "Invalid option. Please type 'static' or 'dhcp'."
-        ;;
+# Helper function for cleaner service checks
+is_service_running() {
+    [[ $(sudo systemctl is-active $1) == "active" ]]
+}
+
+ensure_service_running() {
+    if ! is_service_running "$1"; then
+        echo "Starting $1..."
+        sudo systemctl start "$1"
+        if ! is_service_running "$1"; then
+            echo "Failed to start $1. Exiting."
+            exit 1
+        fi
+    fi
+}
+
+enable_nfs_share() {
+    nfs_package="rpm -q nfs-utils"
+    if [ "$nfs_package" ]; then
+       ensure_service_running "nfs-server"
+       ensure_service_running "rpcbind"
+
+       # Check if the entry exists in /etc/exports
+       if ! grep -q "$export_dir" /etc/exports; then
+          echo "$export_dir *(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+          echo "Entry added to /etc/exports"
+          sudo systemctl restart nfs-server
+          echo "NFS service restarted"
+	  echo "Export NFS Share"
+	  sudo exportfs -r
+      fi
+   fi
+}
+
+cleanup_on_exit() {
+if [ "$PROFILE" = "redhat" ] || [ "$PROFILE" = "suse" ]; then
+    read -p "Are you sure you want to Cleaning Up Docker  Comapose Service Resources for $PROFILE ? (y/n) " choice
+    case "$choice" in
+    y|Y )
+	 container_ids=$(docker compose --file "$COMPOSE_FILE" ps --services "$PROFILE-ansible" -q )
+         if [ "$container_ids" ]; then
+              echo "Stopping $PROFILE Docker Compose services..."
+              docker compose --file $COMPOSE_FILE --profile $PROFILE down
+              echo ""
+              echo "Docker Compose $PROFILE services have been stopped..."
+         fi
+	 echo ""
+         echo "Performing cleanup $PROFILE Docker Compose services..."
+         docker volume rm "sap-hana-deploy_ansible-vol-$PROFILE"
+	 echo "Remove orphaned networks"
+         docker network prune -f
+	 echo ""
+    ;;
+    n|N )
+        echo "Stop operation cancelled."
+        return  # Exit the function
+    ;;
+       * )
+         echo "Invalid input"
+    ;;
     esac
-  done
+ else
+   echo "Invalid argument. Usage: compose-lnx.sh stop [redhat|suse]"
+   return 2
+ fi
+   return 0
 }
 
-# Placeholder for the static IP configuration function
-configure_static() {
-  sudo bash -c "cat > /etc/netplan/99-netcfg.yaml" <<EOF
-  # Generated by Appliance Script.
-  network:
-    version: 2
-    renderer: networkd
-    ethernets:
-      eth0:
-        dhcp4: no
-        dhcp6: no
-        addresses:
-          - ${ipaddress}
-        routes:
-          - to: default
-            via: ${gateway}
-        nameservers:
-          addresses:
-            - ${nameserver}
-EOF
-
-  sudo bash -c "cat > /etc/resolv.conf" <<EOF
-# Generated by Appliance Script.
-nameserver ${nameserver}
-search ${search}
-EOF
-
-  echo ""
-  sudo bash -c "netplan apply"
-  echo "Static IP configuration applied..."
+display_help() {
+    echo "Usage: compose-lnx.sh action [redhat|suse]"
+    echo "action:"
+    echo "    start   Start Docker Compose Services For the Given Profile."
+    echo "    stop    Stop Docker Compose Services For the Given Profile."
+    echo "    connect Connect Docker Compose Services For the Given Profile."
+    echo "    status  Show Docker Compose Status."
+    echo "    cleanup Cleaning up  Docker Compose Service Resources."
+    echo "    help    Display Help Message."
+    echo "profile:"
+    echo "    redhat  Start/Stop Docker Redhat Compose services."
+    echo "    suse    Start/Stop Docker Suse Compose services."
 }
 
-# Placeholder for the DHCP configuration function
-configure_dhcp() {
-  echo
-  echo "Configuring DHCP..."
-  network:
-    version: 2
-    renderer: networkd
-    ethernets:
-      eth0:
-        dhcp4: yes
-        dhcp6: yes
-}
-
-display_net() {
-  # Display IP Address
-  echo -n "IP Address: "
-  ip a s eth0 | grep inet | awk '{ print $2 }' | head -1 | cut -f1 -d'/'
-
-  # Display Gateway
-  echo -n "Gateway   : "
-  ip route | grep default | awk '{print $3}'
-
-  # Display DNS Configuration
-  echo -n "DNS Server: "
-  grep 'nameserver' /etc/resolv.conf | awk '{print $2}'
-
-  # Display Search Configuration
-  echo -n "Search    : "
-  grep 'search' /etc/resolv.conf | awk '{print $2}'
-}
-
-welcome_message() {
-
-sudo bash -c "cat > /etc/update-motd.d/99-hpe" <<EOF
-#!/bin/sh
-#
-
-IPADDR=\`ip a s eth0 | grep inet | awk '{ print \$2 }' | head -1 | cut -f1 -d'/'\`
-GW=\`ip r s default | awk '{ print \$3 }'\`
-DNS=\`grep 'nameserver' /etc/resolv.conf | awk '{print \$2}'\`
-SEARCH=\`grep 'search' /etc/resolv.conf | awk '{print \$2}'\`
-
-# Display the MOTD
-printf "\\n"
-printf "#------------------------------------------------------------------------------#\n"
-printf "#                    HPE SAP HANA DEPLOYMENT APPLIANCE                         #\\n"
-printf "#                                                                              #\\n"
-printf "# If you encounter any situation, please contact CEEMA GSD Value Department.   #\\n"
-printf "# Build Number: 11042024-V2.0                                                  #\\n"
-printf "# Author: Emre Baykal                                                          #\\n"
-printf "# Mail To: trtsasm@hpe.com                                                     #\\n"
-printf "# %-76s #\\n" ""
-printf "# %-76s #\\n" "System IP Address : \$IPADDR "
-printf "# %-76s #\\n" "Default Gateway   : \$GW "
-printf "# %-76s #\\n" "DNS Address       : \$DNS"
-printf "# %-76s #\\n" "Search            : \$SEARCH"
-printf "#------------------------------------------------------------------------------#\n"
-printf "\\n"
-EOF
-
-  sudo bash -c "chmod +x /etc/update-motd.d/99-hpe"
-}
-
-echo ""
-echo ""
-echo "********************************************************************"
-echo "******* Welcome to HPE SAP Systems Deployment Applicance  **********"
-echo "************* Appliance Initial Network Configuration **************"
-echo "********************************************************************"
-echo "Note: Choose your dhcp and static configuration preference...       "
-echo "********************************************************************"
-echo ""
-
-# Execute prompts
-prompt_for_network_config
-echo ""
-sleep 5
-
-echo "********************************************************************"
-echo "****************** Appliance Network Configuration *****************"
-echo "********************************************************************"
-echo ""
-display_net
-echo
-
-welcome_message
-
-sed -i '/\/home\/hpe\/docker-sap-hana-deploy\/appliance\/scripts\/net-apply\.sh/d' /home/hpe/.bashrc
-
+# Check if a specific function is provided as a command line argument
+if [ $# -eq 2 ]; then
+    ACTION=$1
+    PROFILE=$2
+    case "$ACTION" in
+        "start")
+            start_docker_compose $PROFILE
+            ;;
+        "stop")
+            stop_docker_compose $PROFILE
+            ;;
+	"connect")
+            connect_docker_compose $PROFILE
+            ;;
+	"cleanup")
+            cleanup_on_exit $PROFILE
+            ;;
+        *)
+            echo "Invalid action..."
+	    echo ""
+	    display_help
+            ;;
+    esac
+elif [ $# -eq 1 ]; then
+    ACTION=$1
+    case "$ACTION" in
+        "status")
+            show_docker_compose_status
+            ;;
+        "help")
+            display_help
+            ;;
+        *)
+            echo "Invalid action..."
+            echo ""
+            display_help
+            ;;
+    esac
+elif [ $# -eq 0 ]; then
+    echo "Missing arguments."
+    display_help
+else
+    echo "Invalid action..."
+    echo ""
+    display_help
+fi
