@@ -24,12 +24,14 @@ This repository contains Docker Compose configurations for deploying a SAP HANA 
 ```bash
 ./compose-lnx.sh action [profile]
 
-Actions:
-start: Start Docker Compose services for the given profile.
-stop: Stop Docker Compose services for the given profile.
-connect: Connect to Docker Compose services for the given profile.
-status: Show the status of Docker Compose services.
-cleanup: Clean up Docker Compose service resources.
-Profiles:
-redhat: Manage Docker Redhat Compose services.
-suse: Manage Docker Suse Compose services.
+Usage: compose-lnx.sh action [redhat|suse]
+action:
+    start   Start Docker Compose Services For the Given Profile.
+    stop    Stop Docker Compose Services For the Given Profile.
+    connect Connect Docker Compose Services For the Given Profile.
+    status  Show Docker Compose Status.
+    cleanup Cleaning up  Docker Compose Service Resources.
+    help    Display Help Message.
+profile:
+    redhat  Start/Stop Docker Redhat Compose services.
+    suse    Start/Stop Docker Suse Compose services.
