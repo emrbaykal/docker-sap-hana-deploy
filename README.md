@@ -1,6 +1,6 @@
 # SAP HANA Deployment with Docker
 
-This repository contains Docker Compose configurations for deploying a SAP HANA environment with support for SUSE and RedHat platforms. The setup includes a web server (Nginx), an NFS server, and Ansible-managed containers for SLES and RHEL.
+This repository contains Docker Compose configurations for deploying a SAP HANA environment with support for SUSE and RedHat platforms. The setup includes a web server (Nginx), and Ansible-managed containers for SLES and RHEL.
 
 ## Services Overview
 
@@ -11,20 +11,25 @@ This repository contains Docker Compose configurations for deploying a SAP HANA 
 ## Prerequisites
 
 - Docker and Docker Compose installed on your host machine.
+- NFS-Server Packages installed on your host machine.
 - Familiarity with Docker, Docker Compose, and Ansible.
 
-## Configuration
+## Supported Operating Systems
 
-Before running the Docker Compose file, ensure you have the following:
+- Redhat Enterprise Linux, Ubuntu Server
+- Mac OS X
 
-1. **Environment Variables:** Define `HOST_IP` in your environment to match your gateway host IP.
-
-2. **Volume Preparation:** Place your Nginx and media content in the `./web/html/` directory as needed.
-
-## Deployment
-
-To deploy the services:
+## Usage
 
 ```bash
-docker-compose --profile suse up -d
-docker-compose --profile redhat up -d
+./compose-lnx.sh action [profile]
+
+Actions:
+start: Start Docker Compose services for the given profile.
+stop: Stop Docker Compose services for the given profile.
+connect: Connect to Docker Compose services for the given profile.
+status: Show the status of Docker Compose services.
+cleanup: Clean up Docker Compose service resources.
+Profiles:
+redhat: Manage Docker Redhat Compose services.
+suse: Manage Docker Suse Compose services.
