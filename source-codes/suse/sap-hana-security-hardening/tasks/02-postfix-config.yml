@@ -1,0 +1,69 @@
+---
+
+   - name: Configure mail forwarding for root user
+     template:
+       src: main.j2
+       dest: /etc/postfix/main.cf
+       owner: root
+       group: root
+       mode: 0644
+       backup: yes
+     when: relayhost != "smtp.office365.com"
+
+   - name: Configure mail forwarding for root user to smtp.office365.com
+     block:
+
+       - name: Create main.cf File
+         template:
+           src: main_office365.j2
+           dest: /etc/postfix/main.cf
+           owner: root
+           group: root
+           mode: 0644
+           backup: yes
+
+       - name: Configure "sasl_passwd" 
+         lineinfile:
+           path: /etc/postfix/sasl_passwd
+           line: "[smtp.office365.com]:587 {{ sendermail }}:{{ sendermail_password }}"
+         notify: compile_sasl_passwd
+
+       - name: Enable tlsmgr feature
+         replace:
+           dest: /etc/postfix/master.cf
+           regexp: "^#tlsmgr+(.*)?$"
+           replace: "tlsmgr    unix  -       -       n       1000?   1       tlsmgr"
+
+     when: relayhost == "smtp.office365.com"
+
+   - name: Root User Canonical Map
+     lineinfile:
+       path: /etc/postfix/sender_canonical
+       line: "root {{ sendermail }}"
+     notify: postmap
+
+   - name: Force postmap services
+     meta: flush_handlers
+
+   - name: Change Root's Email
+     replace:
+       dest: /etc/aliases
+       regexp: "^#root+(.*)?$"
+       replace: "root:  {{ recipientmail }}"
+     notify:
+       - newaliases
+       - postfix
+
+   - name: force all notified handlers to run at this point, not waiting for normal sync points
+     meta: flush_handlers
+
+   - name: Enable Postfix Mail Service
+     systemd:
+       name: postfix
+       state: restarted
+       enabled: yes
+
+   - name: Test Mail Forwarding
+     shell: 'mail -s "This email is a test message using Postfix to {{ inventory_hostname }}.{{ fqdn }}" {{ recipientmail }}  < /dev/null'
+
+

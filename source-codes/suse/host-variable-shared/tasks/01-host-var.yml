@@ -1,0 +1,20 @@
+---
+
+    - read_csv:
+        path: /root/ansible/vms-shared-storage.csv
+        key: hostname
+      register: vms
+
+    - debug:
+        msg: "{{ item.key }}:
+              {{ item.value.hostname }},
+              {{ item.value.data_ip }}"
+      loop: "{{ vms.dict|dict2items }}"
+
+    - name: Deploy User Variable File
+      template:
+         src: hosts-vars.j2
+         dest: "/root/ansible/host_vars/{{ item.value.hostname }}.yml"
+      loop: "{{ vms.dict|dict2items }}"
+      # delegate_to: localhost
+

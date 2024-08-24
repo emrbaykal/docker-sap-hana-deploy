@@ -1,0 +1,68 @@
+---
+# Configure Server BIOS
+
+- name: ILO REST POST GEN10 & GEN10+ BIOS CONFIG
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/bios/settings/"
+    method: POST
+    return_content: yes
+    body: "{\"Attributes\": {\"WorkloadProfile\": \"GeneralPeakFrequencyCompute\",\"AsrStatus\": \"Disabled\" , \"ProcHyperthreading\": \"Enabled\", \"ProcX2Apic\": \"Disabled\", \"AdvancedMemProtection\": \"FastFaultTolerantADDDC\", \"ProcVirtualization\": \"Disabled\", \"IntelProcVtd\": \"Disabled\", \"Sriov\": \"Disabled\", \"BootMode\": \"Uefi\", \"MinProcIdlePkgState\": \"C6Retention\", \"MinProcIdlePower\": \"C6\", \"EnergyPerfBias\": \"MaxPerf\", \"SubNumaClustering\": \"Disabled\", \"HwPrefetcher\": \"Enabled\", \"SecureBootCurrentState\": \"False\", \"SecureBootEnable\": \"False\", \"FanFailPolicy\": \"Allow\", \"RedundantPowerSupply\": \"BalancedMode\" }}"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  when: hw_generation is search('Gen10')
+  delegate_to: localhost
+
+
+- name: ILO REST POST GEN11 BIOS CONFIG
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/bios/settings/"
+    method: PATCH
+    return_content: yes
+    body: "{\"Attributes\": {\"WorkloadProfile\": \"Custom\", \"PowerRegulator\": \"StaticHighPerf\", \"ProcX2Apic\": \"Auto\", \"AdvancedMemProtection\": \"ADDDC\", \"Sriov\": \"Disabled\", \"IntelProcVt\": \"Disabled\", \"IntelProcVtd\": \"Disabled\", \"ProcHyperthreading\": \"Enabled\", \"HwPrefetcher\": \"Enabled\", \"MinProcIdlePower\": \"C6\", \"MinProcIdlePkgState\": \"C6Retention\", \"EnergyPerfBias\": \"MaxPerf\", \"IntelUpiPowerManagement\": \"Disabled\", \"SubNumaClustering\": \"Disabled\", \"MaxMemBusFreqMHz\": \"Auto\", \"UncoreFreqScaling\": \"Auto\", \"EnergyEfficientTurbo\": \"Enabled\", \"MemPatrolScrubbing\": \"Enabled\", \"NumaGroupSizeOpt\": \"Clustered\", \"DcuIpPrefetcher\": \"Enabled\", \"DcuStreamPrefetcher\": \"Enabled\", \"AdjSecPrefetch\": \"Enabled\", \"IntelNicDmaChannels\": \"Enabled\", \"ProcTurbo\": \"Enabled\", \"IntelDmiLinkFreq\": \"Auto\" }}"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  when: hw_generation is search('Gen11')
+  delegate_to: localhost
+
+- name: ILO REST POST Rebbot Server
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
+    method: POST
+    return_content: yes
+    body: "{\"ResetType\": \"ForceRestart\"}"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  delegate_to: localhost
+
+- name: Proliant Server Boot State
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+    method: GET
+    return_content: yes
+    body: ""
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  delegate_to: localhost
+  register: server_state
+  until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
+  retries: 60  # Maximum number of retries
+  delay: 10  # Delay between retries (seconds)
+
+- debug:
+    msg: "Proliant Server Booted Successfully..."

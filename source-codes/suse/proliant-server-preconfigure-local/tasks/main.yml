@@ -1,0 +1,41 @@
+---
+# tasks file for physical-server-preconfigure
+
+- import_tasks: 00-hw-generation-check.yml
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::hw-generation-check
+
+- import_tasks: 01-firmware-upgrade.yml
+  when: firmware_update == true
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::firmware-upgrade
+
+- import_tasks: 02-power-state.yml
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::power-state
+
+- import_tasks: 03-logical-drives.yml
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::logical-drives
+  when: broadcom_megaraid == false
+
+- import_tasks: 04-bios-settings.yml
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::bios-settings
+
+- import_tasks: 05-pmem-bios-settings.yml
+  when: pmem == true
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::pmem-bios-settings
+
+- import_tasks: 06-automate-server-install.yml
+  when:  automate_install == true
+  tags:
+    - role::physical-server-preconfigure-local
+    - role::physical-server-preconfigure-local::automate-server-install

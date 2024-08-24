@@ -1,0 +1,16 @@
+---
+
+   - name: Disable Ctrl-Alt-Del
+     file:
+       src: /dev/null
+       dest: /etc/systemd/system/ctrl-alt-del.target
+       owner: root
+       group: root
+       state: link
+
+   - name: Disable Ctrl-Alt-Del Burst Action
+     lineinfile:
+       dest: /etc/systemd/system.conf
+       state: present
+       regexp: ^CtrlAltDelBurstAction
+       line: CtrlAltDelBurstAction=none

@@ -1,0 +1,100 @@
+---
+
+- hosts: localhost
+  gather_facts: no
+
+  roles:
+    - { role: host-variable-local } # role::host-variable-local
+
+- hosts: hana
+  serial: 4
+  remote_user: root
+  gather_facts: no
+
+  vars:
+          # Automate OS Installation
+          # If ILO Can access to deployment server via using http protocol
+          # You can enable this feature (true/false)
+          automate_install: true
+          installation_media: SLE-15-SP5-SAP-x86_64-DVD.iso
+
+          # Automate Proliant Server Firmware Update
+          # If ILO Can access to deployment server via using http protocol
+          # You can enable this feature (true/false)
+          firmware_update: true
+          spp: P26228_001_spp-2019.12.0-SPP2019120.2019_1209.4.iso
+
+          # HANA Operating System Firewall / ture Or false
+          firewall: false
+
+          # Two Factor Authentication
+          two_way_auth: false
+          pam_module: google-authenticator-libpam-1.09-15.2.x86_64.rpm
+
+          # Sap Servers Hostname / IP Informations
+          fqdn: hpelab.local
+
+          # Mail Relay Host / Admin Mail Address
+          # relayhost: smtp.office365.com If Customer using relay mail to Office 365
+          relayhost: smtp.office365.com
+          recipientmail: emre.baykal@hpelab.local
+          sendermail: emre.baykal@hpelab.local
+          # sendermail_password: sender mail password If Customer using relay mail to Office 365, oherwise keep blank
+          sendermail_password: xxxxx
+          mail_domain: hpelab.local
+
+          # Remote Sys Log Server // Keep Blank if rsyslog server not desired
+          rsys_log_srv: XXX.XXX.XXX.XXX
+          rsys_log_srv_port: 514
+          # Transport Protocal May use tcp or udp
+          rsys_protocol: udp
+
+          # Time Sync Parameters
+          ntp_servers:
+            - XXX.XXX.XXX.XXX
+            - XXX.XXX.XXX.XXX
+
+          # Monitoring Thresholds
+          monitoring: true
+          # CPU Usage % Threshold
+          cpu_threshold: 85
+          # Memory Usage % Threshold
+          mem_threshold: 85
+          # Disk Usage % Threshold
+          disk_threshold: 80
+
+
+          # HPE Oneview Config Parameters
+          oneview_ip: XXX.XXX.XXX.XXX
+          oneview_username: administrator
+          oneview_password: xxxxxxxxxx
+          email_sender: server@hpelab.local
+
+          # Hana StoreOnce Catalyst Plug In Config
+          catalyst_plugin: HPE_StoreOnce_Catalyst_Plug_in_2.2.0_for_SAP_HANA_Linux_EH991-91007.tar.gz
+          storeonce_ip: XXX.XXX.XXX.XXX
+          storeonce_username: Admin
+          storeonce_password: xxxxxxxx
+          catalyst_client_password: xxxxxxxx
+          storeonce_config: true
+
+          # Hana Installation files
+          hana_deployment:
+              server: IMDB_SERVER20_076_0-80002031.SAR
+              client: IMDB_CLIENT20_019_21-80002082.SAR
+              sapcar: SAPCAR_1324-80000935.EXE
+              hostagent: saphostagentrpm_62-80004822.rpm
+              source: /root/media
+              destination: /setup
+
+
+
+  roles:
+          - { role: proliant-server-preconfigure-local } # role::physical-server-preconfigure-local
+          - { role: sap-hana-preconfigure-local }        # role::sap-hana-preconfigure-local
+          - { role: sap-hana-security-hardening }        # role::sap-hana-security-hardening
+          - { role: sap-hana-deploy }                    # role::sap-hana-deploy
+          - { role: sap-hana-replication }               # role::sap-hana-replication
+          - { role: sap-hana-storeonce-backup }          # role::sap-hana-storeonce-backup
+          - { role: sap-hana-mfa }                       # role::sap-hana-mfa
+          - { role: oneview-config }                     # role::oneview-config

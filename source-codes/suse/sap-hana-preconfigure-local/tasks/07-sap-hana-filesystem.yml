@@ -1,0 +1,127 @@
+---
+
+# Configure Local Mount Points
+
+- name: Megaraid Card Virtual Drive Config
+  block:
+
+    #    - name: Drive state to unconfigured good
+    #  command: "/opt/MegaRAID/storcli/storcli64 /c0/e{{ disk_controller }}/s{{ disk_drives }} set good"
+
+    - name: Add Virtual Drive For HANA DB
+      command: "/opt/MegaRAID/storcli/storcli64 /c0 add vd type=r5 name=HANA drives={{ disk_controller }}:{{ broadcom_megaraid_disks }}"
+
+    - name: sleep for 30 seconds and continue with play
+      wait_for:
+        timeout: 30
+      delegate_to: localhost
+
+    - name: Show Virtual Drive Informations
+      command: "/opt/MegaRAID/storcli/storcli64 /c0/vall show"
+      register: virtual_drives
+
+    - name: List Virtual Drives
+      debug:
+        var: virtual_drives.stdout_lines
+
+  when: broadcom_megaraid == true
+
+- name: Run shell command to find Suitable SAP Hana Disk
+  shell: lsblk -b -n -o NAME,SIZE | awk '$2 > ("{{ hanavols.hana_shared.size}} + {{ hanavols.hana_data.size}} + {{ hanavols.hana_logs.size}} + {{ hanavols.usr_sap.size}} ")*1024*1024*1024 { print $1 }'
+  register: sap_hana_disk_raw
+  changed_when: false
+
+- name: Parse Sap Hana Disk
+  set_fact:
+    hana_disk: "{{ sap_hana_disk_raw.stdout }}"
+  when: sap_hana_disk_raw.stdout | length > 0
+
+- name: Display Suitable Hana Disk
+  debug:
+    msg: "Sap Hana disk found on {{ inventory_hostname }}: {{ hana_disk }}"
+  when: sap_hana_disk_raw.stdout | length > 0
+
+- name: Create "/dev/{{ hana_disk }}" parted partition
+  parted:
+    device: "/dev/{{ hana_disk }}"
+    number: 1
+    label: gpt
+    state: present
+
+- name: Create a volume group on top of /dev/{{ hana_disk }}1
+  lvg:
+    vg: "{{ hana_disks['volume_group'] }}"
+    pvs: "/dev/{{  hana_disk }}1"
+
+
+- name: Create a lv_hana_shared logical volume
+  lvol:
+    vg: "{{ hanavols['hana_shared']['vol'] }}"
+    lv: "{{ hanavols['hana_shared']['lv'] }}"
+    size: "{{ hanavols['hana_shared']['size'] }}"
+
+- name: Create lv_hana_shared File System
+  filesystem:
+    fstype: "{{ hanavols['hana_shared']['fs_type'] }}"
+    dev: "/dev/{{ hanavols['hana_shared']['vol'] }}/{{ hanavols['hana_shared']['lv'] }}"
+
+- name: Set /hana/shared Mount Points
+  mount:
+    path: "{{ hanavols['hana_shared']['mountpoint'] }}"
+    src: "/dev/{{ hanavols['hana_shared']['vol'] }}/{{ hanavols['hana_shared']['lv'] }}"
+    fstype: "{{ hanavols['hana_shared']['fs_type'] }}"
+    state: mounted
+
+- name: Create a lv_hana_data logical volume
+  lvol:
+    vg: "{{ hanavols['hana_data']['vol'] }}"
+    lv: "{{ hanavols['hana_data']['lv'] }}"
+    size: "{{ hanavols['hana_data']['size'] }}"
+
+- name: Create lv_hana_data File System
+  filesystem:
+   fstype: "{{ hanavols['hana_data']['fs_type'] }}"
+   dev: "/dev/{{ hanavols['hana_data']['vol'] }}/{{ hanavols['hana_data']['lv'] }}"
+
+- name: Set /hana/data Mount Points
+  mount:
+    path: "{{ hanavols['hana_data']['mountpoint'] }}"
+    src: "/dev/{{ hanavols['hana_data']['vol'] }}/{{ hanavols['hana_data']['lv'] }}"
+    fstype: "{{ hanavols['hana_data']['fs_type'] }}"
+    state: mounted
+
+- name: Create a lv_hana_logs logical volume
+  lvol:
+    vg: "{{ hanavols['hana_logs']['vol'] }}"
+    lv: "{{ hanavols['hana_logs']['lv'] }}"
+    size: "{{ hanavols['hana_logs']['size'] }}"
+
+- name: Create lv_hana_logs File System
+  filesystem:
+    fstype: "{{ hanavols['hana_logs']['fs_type'] }}"
+    dev: "/dev/{{ hanavols['hana_logs']['vol'] }}/{{ hanavols['hana_logs']['lv'] }}"
+
+- name: Set /hana/logs Mount Points
+  mount:
+    path: "{{ hanavols['hana_logs']['mountpoint'] }}"
+    src: "/dev/{{ hanavols['hana_logs']['vol'] }}/{{ hanavols['hana_logs']['lv'] }}"
+    fstype: "{{ hanavols['hana_logs']['fs_type'] }}"
+    state: mounted
+
+- name: Create a lv_hana_usr_sap logical volume
+  lvol:
+    vg: "{{ hanavols['usr_sap']['vol'] }}"
+    lv: "{{ hanavols['usr_sap']['lv'] }}"
+    size: "{{ hanavols['usr_sap']['size'] }}"
+
+- name: Create lv_hana_usr_sap File System
+  filesystem:
+    fstype: "{{ hanavols['usr_sap']['fs_type'] }}"
+    dev: "/dev/{{ hanavols['usr_sap']['vol'] }}/{{ hanavols['usr_sap']['lv'] }}"
+
+- name: Set /usr/sap Mount Points
+  mount:
+    path: "{{ hanavols['usr_sap']['mountpoint'] }}"
+    src: "/dev/{{ hanavols['usr_sap']['vol'] }}/{{ hanavols['usr_sap']['lv'] }}"
+    fstype: "{{ hanavols['usr_sap']['fs_type'] }}"
+    state: mounted

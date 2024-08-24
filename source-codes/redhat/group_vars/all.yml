@@ -1,0 +1,6 @@
+---
+
+ansible_connection: ssh
+ansible_user: root
+ansible_ssh_pass: HP1nv3nt
+gateway_host_ip: 192.168.68.58

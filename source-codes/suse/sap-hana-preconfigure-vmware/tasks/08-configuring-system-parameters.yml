@@ -1,0 +1,113 @@
+---
+- name: Configuring System Parameters
+  template:
+    src=files/boot-local
+    dest=/etc/init.d/boot.local
+    owner=root
+    group=root
+    mode=0644
+    backup=yes
+
+- name: Enable Saptune Solution HANA
+  command: "saptune solution apply HANA"
+
+- name: Aplly Vmware Sap Note
+  command: "saptune note apply 2161991"
+  when:
+    - ansible_virtualization_type == "VMware"
+
+- name: Make sure that sapconf and tuned are stopped and disabled
+  command: "saptune service takeover"
+
+- name: Start & Enable Saptune Service
+  command: "saptune service enablestart"
+
+- name: Create logint directory
+  file:
+    path: /etc/systemd/logind.conf.d
+    state: directory
+    mode: 0755
+
+- name: UserTasksMax setting for user root
+  copy:
+    content: |
+               [Login]
+               UserTasksMax=infinity
+    dest: /etc/systemd/logind.conf.d/sap-hana.conf
+    mode: 0755
+
+- name: Disable Suspend & Hibernate
+  command: "systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target"
+
+- name: Disabling the fstrim.timer and fstrim.service Services
+  service:
+    name="{{ item.sname }}"
+    state="{{ item.state }}"
+    enabled="{{ item.mode }}"
+  with_items:
+    - { sname: 'fstrim.timer', state: 'stopped', mode: 'no'}
+    - { sname: 'fstrim.service', state: 'stopped', mode: 'no'}
+
+- name: Calculating crashkernel Allocation Size
+  command: "kdumptool calibrate"
+  register: kdump_size
+
+- set_fact:
+    kdumplist: "{{ kdump_size.stdout_lines | list }}"
+
+- set_fact:
+    size_high: "{{ item | regex_search('\\d+') }}"
+  with_items: "{{ kdumplist[2] }}"
+
+- set_fact:
+    size_low: "{{ item | regex_search('\\d+') }}"
+  with_items: "{{ kdumplist[1] }}"
+
+- name: Change grub File Parameters in to /etc/default/grub
+  lineinfile:
+      path=/etc/default/grub
+      regexp="^GRUB_CMDLINE_LINUX_DEFAULT="
+      line='GRUB_CMDLINE_LINUX_DEFAULT="splash={{ ansible_cmdline['splash'] }} mitigations={{ ansible_cmdline['mitigations'] }} quiet crashkernel={{ size_high }}M,high crashkernel={{ size_low }}M,low transparent_hugepage=never numa_balancing=disable intel_idle.max_cstate=1 processor.max_cstate=1 "'
+  register: grub
+
+- name: Run the grub2-mkconfig -o /boot/grub2/grub.cfg command to generate the grub configuration file
+  command: "grub2-mkconfig -o /boot/grub2/grub.cfg"
+  when: grub.changed
+
+- name: Enable Kdump Service
+  service:
+    name: kdump
+    state: started
+    enabled: yes
+
+- name: Rebooting ...
+  shell: sleep 2 && /sbin/shutdown -r now "Reboot required for grub"
+  async: 1
+  poll: 0
+  ignore_errors: true
+  when: grub.changed
+  register: rebooting
+
+- name: Wait for system to become reachable
+  wait_for_connection:
+    timeout: 900
+    sleep: 15
+    delay: 30
+  when: rebooting.changed
+
+- name: A new initrd has to be created
+  command: "mkinitrd"
+
+- name: Rebooting ...
+  shell: sleep 2 && /sbin/shutdown -r now "Reboot required for grub"
+  async: 1
+  poll: 0
+  ignore_errors: true
+  register: rebooting
+
+- name: Wait for system to become reachable
+  wait_for_connection:
+    timeout: 900
+    sleep: 15
+    delay: 30
+  when: rebooting.changed

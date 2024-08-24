@@ -1,0 +1,41 @@
+---
+# tasks file for physical-server-preconfigure
+
+- import_tasks: 00-hw-generation-check.yml
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::hw-generation-check
+
+- import_tasks: 01-firmware-upgrade.yml
+  when: firmware_update == true
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::firmware-upgrade
+
+- import_tasks: 02-power-state.yml
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::power-state
+
+- import_tasks: 03-logical-drives.yml
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::logical-drives
+  when: broadcom_megaraid == false
+
+- import_tasks: 04-bios-settings.yml
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::bios-settings
+
+- import_tasks: 05-pmem-bios-settings.yml
+  when: pmem == true
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::pmem-bios-settings
+
+- import_tasks: 06-automate-server-install.yml
+  when:  automate_install == true
+  tags:
+    - role::physical-server-preconfigure-shared
+    - role::physical-server-preconfigure-shared::automate-server-install

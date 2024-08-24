@@ -1,0 +1,135 @@
+---
+    - name: Get Server Power Status
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Chassis?$expand=."
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: status
+
+    - set_fact:
+        myvar: "{{ status.json.Members[0].PowerState }}"
+
+    - debug:
+        msg: "Server Power State is: {{ myvar }}"
+
+    - name: Server Powering OFF
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
+        method: POST
+        return_content: yes
+        body: "{\"ResetType\": \"ForceOff\"}"
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      when: myvar == "On"
+      register: power
+
+    - debug:
+        var=power.json.error
+      when: myvar == "On"
+
+    - name: Task to boot a system using an ISO from an HP iLO interface
+      hpilo_boot:
+        host: "{{ server_hardware_ilo_ip }}"
+        login: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        media: cdrom
+        image: http://{{ gateway_host_ip }}/media/{{ spp }}
+        state: boot_always
+      delegate_to: localhost
+
+    - name: Booting Proliant Server From SPP DVD
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: server_state
+      until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
+      retries: 60  # Maximum number of retries
+      delay: 10  # Delay between retries (seconds)
+
+    - debug:
+        msg: "Proliant Server Booted Successfully..."
+
+    - name: Initializing SPP DVD
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: server_state
+      until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "FinishedPost"
+      retries: 60  # Maximum number of retries
+      delay: 10  # Delay between retries (seconds)
+
+    - debug:
+        msg: "Proliant Server Firmware Upgrade Tasks Have Been Started..."
+
+    - name: Firmware Upgrade Process
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: server_state
+      until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPost"
+      retries: 180  # Maximum number of retries
+      delay: 10  # Delay between retries (seconds)
+
+    - debug:
+        msg: "Proliant Server Firmware Update Process Has Been Completed..."
+
+    - name: Proliant Server Boot State
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: server_state
+      until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
+      retries: 120  # Maximum number of retries
+      delay: 10  # Delay between retries (seconds)
+
+    - debug:
+        msg: "Proliant Server Booted Successfully..."

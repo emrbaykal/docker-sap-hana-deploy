@@ -1,0 +1,72 @@
+---
+# tasks file for saphana-replication
+
+  - name: Gathering facts
+    setup:
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::setup
+
+  - import_tasks: 01-preparing-master-server.yml
+    when:
+      - primary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::preparing-master
+
+  - import_tasks: 02-preparing-slave-server.yml
+    when:
+      - secondary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::preparing-slave-server
+
+  - import_tasks: 03-perform-system-replication.yml
+    when:
+      - secondary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::perform-system-replication
+
+  - import_tasks: 04-system-replication-status.yml
+    when:
+      - primary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::system-replication-status
+
+  - import_tasks: 05-preparing-master-server-tier3-replication.yml
+    when:
+      - primary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::preparing-master-server-tier3-replication
+
+  - import_tasks: 06-preparing-slave-server-tier3-replication.yml
+    when:
+      - secondary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::preparing-slave-server-tier3-replication
+
+  - import_tasks: 07-preparing-tertiary-server-tier3-replication.yml
+    when:
+      - tertiary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::06-preparing-tertiary-server-tier3-replication
+
+  - import_tasks: 08-perform-system-tier3-replication.yml
+    when:
+      - tertiary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::07-perform-system-tier3-replication.yml
+
+  - import_tasks: 09-system-tier3-replication-status.yml
+    when:
+      - primary_server['hostname'] == ansible_hostname
+    tags:
+      - role::sap-hana-replication
+      - role::sap-hana-replication::system-tier3-replication-status
+
