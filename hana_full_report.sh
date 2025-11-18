@@ -465,7 +465,7 @@ detect_hana_instances() {
     echo "=== Checking for HANA admin users ===" >> "$OUTFILE"
     local user_sids
     user_sids=$(getent passwd | awk -F':' '/SAP HANA Database System Administrator/ {print $1}' | sed 's/adm$//' | tr '[:lower:]' '[:upper:]' 2>/dev/null)
-    
+
     if [[ -n "$user_sids" ]]; then
         while IFS= read -r sid; do
             if [[ -n "$sid" && ! " ${hana_sids[@]} " =~ " ${sid} " ]]; then
