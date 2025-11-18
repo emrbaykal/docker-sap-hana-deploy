@@ -13,9 +13,8 @@ set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HOSTNAME="$(hostname -s)"
 readonly TIMESTAMP="$(date +%F_%H-%M-%S)"
-readonly OUTDIR="${REPORT_DIR:-/root}"
-readonly OUTFILE="${OUTDIR}/sap-report-${HOSTNAME}-${TIMESTAMP}.txt"
-readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"
+# OUTDIR and OUTFILE will be set after argument parsing in main()
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -837,6 +836,10 @@ execute_as_hana_user() {
 main() {
     local start_time
     start_time=$(date +%s)
+    
+    # Set output directory and file after argument parsing
+    readonly OUTDIR="${REPORT_DIR:-/root}"
+    readonly OUTFILE="${OUTDIR}/sap-report-${HOSTNAME}-${TIMESTAMP}.txt"
 
     # Validate environment
     if [[ $EUID -ne 0 && "${TEST_MODE:-false}" != "true" ]]; then
