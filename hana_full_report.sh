@@ -1,7 +1,10 @@
 #!/bin/bash
 
 # SAP HANA Full System Report Generator
-# Version: 2.0
+# Company : Hewlett Packard Enterprise
+# Version : 3.2.0.0
+# Date    : 06/20/2025
+# AUTHOR  : Emre Baykal - HPE Profesional Services
 # Description: Comprehensive system and SAP HANA analysis tool
 
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
