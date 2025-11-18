@@ -11,7 +11,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HOSTNAME="$(hostname -s)"
 readonly TIMESTAMP="$(date +%F_%H-%M-%S)"
 readonly OUTDIR="${REPORT_DIR:-/root}"
-readonly OUTFILE="${OUTDIR}/hana-report-${HOSTNAME}-${TIMESTAMP}.txt"
+readonly OUTFILE="${OUTDIR}/sap-report-${HOSTNAME}-${TIMESTAMP}.txt"
 readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 # Colors for output
@@ -172,7 +172,6 @@ collect_system_info() {
 
     section "Kernel Information"
     safe_exec "uname -a"
-    safe_exec "cat /proc/version"
 
     section "System Date and Time"
     safe_exec "date"
@@ -254,10 +253,6 @@ collect_hardware_info() {
     done
 
     section "Hardware Details"
-    if command_exists lshw; then
-        safe_exec "lshw -short"
-    fi
-
     if command_exists dmidecode; then
         safe_exec "dmidecode -t system | head -20"
     fi
@@ -352,6 +347,220 @@ collect_network_info() {
     elif command_exists netstat; then
         safe_exec "netstat -tuln | head -20"
     fi
+}
+
+collect_hardware_components() {
+    section "BIOS and System Firmware"
+    {
+        echo "=== BIOS/UEFI Information ==="
+        if command_exists dmidecode; then
+            dmidecode -t bios 2>/dev/null | grep -E "(Vendor|Version|Release Date|BIOS Revision)" || echo "BIOS information not available"
+            echo ""
+            echo "=== System Information ==="
+            dmidecode -t system 2>/dev/null | grep -E "(Manufacturer|Product Name|Version|Serial Number)" || echo "System information not available"
+            echo ""
+            echo "=== Motherboard Information ==="
+            dmidecode -t baseboard 2>/dev/null | grep -E "(Manufacturer|Product Name|Version|Serial Number)" || echo "Motherboard information not available"
+        else
+            echo "dmidecode not available - cannot retrieve BIOS/system information"
+        fi
+    } >> "$OUTFILE"
+
+    section "Disk Controllers and Storage Firmware"
+    {
+        echo "=== Storage Controllers (PCI) ==="
+        if command_exists lspci; then
+            lspci -v | grep -A 10 -i -E "(storage controller|sata|scsi|raid|nvme controller)" | head -50 || echo "No storage controllers found"
+        else
+            echo "lspci not available"
+        fi
+        
+        echo ""
+        echo "=== Disk Drive Firmware Versions ==="
+        if command_exists smartctl; then
+            for device in $(lsblk -d -n -o NAME | grep -E "^(sd|nvme|hd)"); do
+                if [[ -e "/dev/$device" ]]; then
+                    echo "--- Storage Device: /dev/$device ---"
+                    smartctl -i "/dev/$device" 2>/dev/null | grep -E "(Device Model|Model Number|Serial Number|Firmware Version|User Capacity)" | head -10 || echo "SMART info not available for /dev/$device"
+                    echo ""
+                fi
+            done
+        else
+            echo "smartctl not available for storage firmware check"
+        fi
+
+        echo "=== NVMe Storage Detailed Info ==="
+        if command_exists nvme; then
+            for nvme_dev in /dev/nvme*n1; do
+                if [[ -e "$nvme_dev" ]]; then
+                    echo "--- NVMe Device: $nvme_dev ---"
+                    {
+                        echo "Model: $(nvme id-ctrl "$nvme_dev" 2>/dev/null | grep '^mn ' | cut -d: -f2 | xargs || echo 'N/A')"
+                        echo "Serial: $(nvme id-ctrl "$nvme_dev" 2>/dev/null | grep '^sn ' | cut -d: -f2 | xargs || echo 'N/A')"
+                        echo "Firmware: $(nvme id-ctrl "$nvme_dev" 2>/dev/null | grep '^fr ' | cut -d: -f2 | xargs || echo 'N/A')"
+                    } || echo "NVMe info not available for $nvme_dev"
+                    echo ""
+                fi
+            done
+        else
+            echo "nvme command not available"
+        fi
+    } >> "$OUTFILE"
+
+    section "Network Controllers and Firmware"
+    {
+        echo "=== Network Controllers (PCI) ==="
+        if command_exists lspci; then
+            lspci -v | grep -A 8 -i "ethernet\|network" | head -40 || echo "No network controllers found"
+        fi
+
+        echo ""
+        echo "=== Network Interface Driver and Firmware Details ==="
+        for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v -E "^(lo|bond|br|docker|vir)" | head -10); do
+            if [[ -d "/sys/class/net/$iface/device" ]]; then
+                echo "--- Network Interface: $iface ---"
+                
+                # Driver information
+                if [[ -L "/sys/class/net/$iface/device/driver" ]]; then
+                    driver_path=$(readlink "/sys/class/net/$iface/device/driver" 2>/dev/null)
+                    driver_name=$(basename "$driver_path" 2>/dev/null || echo "Unknown")
+                    echo "Driver: $driver_name"
+                fi
+                
+                # Hardware details
+                if [[ -f "/sys/class/net/$iface/device/vendor" ]] && [[ -f "/sys/class/net/$iface/device/device" ]]; then
+                    vendor_id=$(cat "/sys/class/net/$iface/device/vendor" 2>/dev/null || echo "Unknown")
+                    device_id=$(cat "/sys/class/net/$iface/device/device" 2>/dev/null || echo "Unknown")
+                    echo "Hardware ID: $vendor_id:$device_id"
+                fi
+                
+                # Detailed driver and firmware info via ethtool
+                if command_exists ethtool && [[ "$iface" != "lo" ]]; then
+                    ethtool -i "$iface" 2>/dev/null | grep -E "(driver|version|firmware)" || echo "ethtool info not available"
+                fi
+                echo ""
+            fi
+        done
+    } >> "$OUTFILE"
+
+    section "HBA (Host Bus Adapter) Information"
+    {
+        echo "=== Fibre Channel HBAs ==="
+        if [[ -d /sys/class/fc_host ]]; then
+            for hba in /sys/class/fc_host/host*; do
+                if [[ -d "$hba" ]]; then
+                    hba_name=$(basename "$hba")
+                    echo "--- HBA: $hba_name ---"
+                    echo "Node Name: $(cat "$hba/node_name" 2>/dev/null || echo 'N/A')"
+                    echo "Port Name: $(cat "$hba/port_name" 2>/dev/null || echo 'N/A')"
+                    echo "Port State: $(cat "$hba/port_state" 2>/dev/null || echo 'N/A')"
+                    echo "Speed: $(cat "$hba/speed" 2>/dev/null || echo 'N/A')"
+                    echo "Supported Speeds: $(cat "$hba/supported_speeds" 2>/dev/null || echo 'N/A')"
+                    echo ""
+                fi
+            done
+        else
+            echo "No Fibre Channel HBAs found"
+        fi
+
+        echo "=== SCSI Host Adapters ==="
+        if command_exists lspci; then
+            lspci -v | grep -A 5 -i -E "(fibre channel|scsi|hba)" || echo "No SCSI/FC controllers found"
+        fi
+
+        echo ""
+        echo "=== HBA Driver Modules ==="
+        {
+            echo "Loaded HBA drivers:"
+            lsmod | grep -E "(qla|lpfc|mpt|bnx2fc|fnic)" || echo "No common HBA drivers loaded"
+            echo ""
+            echo "HBA driver details:"
+            for module in qla2xxx lpfc mpt3sas bnx2fc fnic; do
+                if lsmod | grep -q "^$module "; then
+                    modinfo "$module" 2>/dev/null | grep -E "(version|description)" || echo "$module info not available"
+                    echo ""
+                fi
+            done
+        }
+    } >> "$OUTFILE"
+
+    section "RAID Controller Information"
+    {
+        echo "=== Hardware RAID Controllers ==="
+        if command_exists lspci; then
+            lspci -v | grep -A 8 -i "raid" || echo "No RAID controllers found via PCI scan"
+        fi
+
+        echo ""
+        echo "=== LSI/Broadcom RAID (MegaRAID) ==="
+        if command_exists megacli || command_exists megacli64 || command_exists storcli || command_exists storcli64; then
+            for cmd in megacli megacli64 storcli storcli64; do
+                if command_exists "$cmd"; then
+                    echo "Using $cmd:"
+                    case $cmd in
+                        *megacli*)
+                            "$cmd" -AdpAllInfo -aAll 2>/dev/null | grep -E "(Product Name|FW Package|BIOS|Serial)" | head -10 || echo "$cmd query failed"
+                            ;;
+                        *storcli*)
+                            "$cmd" /c0 show 2>/dev/null | grep -E "(Product Name|Firmware|BIOS)" | head -10 || echo "$cmd query failed"
+                            ;;
+                    esac
+                    echo ""
+                    break
+                fi
+            done
+        else
+            echo "No LSI/Broadcom RAID utilities found"
+        fi
+
+        echo "=== HP Smart Array Controllers ==="
+        if command_exists hpacucli || command_exists hpssacli || command_exists ssacli; then
+            for cmd in ssacli hpssacli hpacucli; do
+                if command_exists "$cmd"; then
+                    echo "Using $cmd:"
+                    "$cmd" ctrl all show 2>/dev/null | head -10 || echo "$cmd query failed"
+                    "$cmd" ctrl all show detail 2>/dev/null | grep -E "(Controller|Firmware|Hardware)" | head -10 || echo "Detail query failed"
+                    echo ""
+                    break
+                fi
+            done
+        else
+            echo "No HP Smart Array utilities found"
+        fi
+
+        echo "=== Dell PERC Controllers ==="
+        if command_exists omreport; then
+            omreport storage controller 2>/dev/null | grep -E "(Name|Firmware|Driver)" || echo "omreport query failed"
+        elif command_exists perccli || command_exists perccli64; then
+            for cmd in perccli perccli64; do
+                if command_exists "$cmd"; then
+                    "$cmd" /c0 show 2>/dev/null | grep -E "(Product Name|Firmware|Package)" | head -10 || echo "$cmd query failed"
+                    break
+                fi
+            done
+        else
+            echo "No Dell PERC utilities found"
+        fi
+
+        echo ""
+        
+    } >> "$OUTFILE"
+
+    section "Hardware Component Summary"
+    {
+        echo "=== System Component Overview ==="
+        echo "BIOS/UEFI: $(dmidecode -t bios 2>/dev/null | grep "Version" | head -1 | cut -d: -f2 | xargs || echo 'Unknown')"
+        echo "System: $(dmidecode -t system 2>/dev/null | grep "Product Name" | head -1 | cut -d: -f2 | xargs || echo 'Unknown')"
+        echo ""
+        echo "Storage Devices: $(lsblk -d | grep -E "^(sd|nvme)" | wc -l) detected"
+        echo "Network Interfaces: $(ls /sys/class/net/ 2>/dev/null | grep -v lo | wc -l) detected"
+        echo "HBA Controllers: $(ls /sys/class/fc_host/ 2>/dev/null | wc -l) detected"
+        echo ""
+        echo "Critical Driver Status:"
+        echo "- Storage drivers loaded: $(lsmod | grep -E "(ahci|nvme|mpt|qla|lpfc)" | wc -l)"
+        echo "- Network drivers loaded: $(lsmod | grep -E "(e1000|igb|ixgbe|i40e|mlx)" | wc -l)"
+        echo "- RAID drivers loaded: $(lsmod | grep -E "(raid|md)" | wc -l)"
+    } >> "$OUTFILE"
 }
 
 collect_system_config() {
@@ -666,6 +875,7 @@ main() {
 
     run_with_recovery "collect_system_info" "System Information" failed_sections
     run_with_recovery "collect_hardware_info" "Hardware Information" failed_sections
+    run_with_recovery "collect_hardware_components" "Hardware Components & Firmware" failed_sections
     run_with_recovery "collect_storage_info" "Storage Information" failed_sections
     run_with_recovery "collect_network_info" "Network Information" failed_sections
     run_with_recovery "collect_system_config" "System Configuration" failed_sections
