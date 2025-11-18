@@ -376,7 +376,7 @@ collect_hardware_components() {
         else
             echo "lspci not available"
         fi
-        
+
         echo ""
         echo "=== Disk Drive Firmware Versions ==="
         if command_exists smartctl; then
@@ -421,21 +421,21 @@ collect_hardware_components() {
         for iface in $(ls /sys/class/net/ 2>/dev/null | grep -v -E "^(lo|bond|br|docker|vir)" | head -10); do
             if [[ -d "/sys/class/net/$iface/device" ]]; then
                 echo "--- Network Interface: $iface ---"
-                
+
                 # Driver information
                 if [[ -L "/sys/class/net/$iface/device/driver" ]]; then
                     driver_path=$(readlink "/sys/class/net/$iface/device/driver" 2>/dev/null)
                     driver_name=$(basename "$driver_path" 2>/dev/null || echo "Unknown")
                     echo "Driver: $driver_name"
                 fi
-                
+
                 # Hardware details
                 if [[ -f "/sys/class/net/$iface/device/vendor" ]] && [[ -f "/sys/class/net/$iface/device/device" ]]; then
                     vendor_id=$(cat "/sys/class/net/$iface/device/vendor" 2>/dev/null || echo "Unknown")
                     device_id=$(cat "/sys/class/net/$iface/device/device" 2>/dev/null || echo "Unknown")
                     echo "Hardware ID: $vendor_id:$device_id"
                 fi
-                
+
                 # Detailed driver and firmware info via ethtool
                 if command_exists ethtool && [[ "$iface" != "lo" ]]; then
                     ethtool -i "$iface" 2>/dev/null | grep -E "(driver|version|firmware)" || echo "ethtool info not available"
@@ -515,6 +515,7 @@ collect_hardware_components() {
             echo "No LSI/Broadcom RAID utilities found"
         fi
 
+
         echo "=== HP Smart Array Controllers ==="
         if command_exists hpacucli || command_exists hpssacli || command_exists ssacli; then
             for cmd in ssacli hpssacli hpacucli; do
@@ -545,7 +546,7 @@ collect_hardware_components() {
         fi
 
         echo ""
-        
+
     } >> "$OUTFILE"
 
     section "Hardware Component Summary"
@@ -836,7 +837,7 @@ execute_as_hana_user() {
 main() {
     local start_time
     start_time=$(date +%s)
-    
+
     # Set output directory and file after argument parsing
     readonly OUTDIR="${REPORT_DIR:-/root}"
     readonly OUTFILE="${OUTDIR}/sap-report-${HOSTNAME}-${TIMESTAMP}.txt"
@@ -908,6 +909,7 @@ main() {
     # Ensure report is properly completed
     local report_size="$(du -h "$OUTFILE" 2>/dev/null | cut -f1 || echo 'Unknown')"
     local line_count="$(wc -l < "$OUTFILE" 2>/dev/null || echo 'Unknown')"
+
 
     cat >> "$OUTFILE" << EOF
 
