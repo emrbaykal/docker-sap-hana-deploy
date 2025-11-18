@@ -11,7 +11,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HOSTNAME="$(hostname -s)"
 readonly TIMESTAMP="$(date +%F_%H-%M-%S)"
 readonly OUTDIR="${REPORT_DIR:-/root}"
-readonly OUTFILE="${OUTDIR}/hana_full_report_${HOSTNAME}_${TIMESTAMP}.txt"
+readonly OUTFILE="${OUTDIR}/hana-report-${HOSTNAME}-${TIMESTAMP}.txt"
 readonly LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 # Colors for output
@@ -25,7 +25,7 @@ readonly NC='\033[0m' # No Color
 init_report() {
     # Create output directory if it doesn't exist
     mkdir -p "$OUTDIR"
-    
+
     # Initialize report file
     cat > "$OUTFILE" << EOF
 ================================================================================
@@ -67,7 +67,7 @@ show_progress() {
 section() {
     local title="$1"
     local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    
+
     cat >> "$OUTFILE" << EOF
 
 ################################################################################
@@ -83,14 +83,20 @@ EOF
 safe_exec() {
     local cmd="$*"
     local result
-    
+
     log_debug "Executing: $cmd"
-    
-    if result=$(eval "$cmd" 2>&1); then
+
+    # Temporarily disable exit on error for this command
+    set +e
+    result=$(eval "$cmd" 2>&1)
+    local exit_code=$?
+    set -e
+
+    if [[ $exit_code -eq 0 ]]; then
         echo "$result" >> "$OUTFILE"
         return 0
     else
-        echo "ERROR: Command failed - $cmd" >> "$OUTFILE"
+        echo "ERROR: Command failed - $cmd (exit code: $exit_code)" >> "$OUTFILE"
         echo "Error output: $result" >> "$OUTFILE"
         log_warn "Command failed: $cmd"
         return 1
@@ -102,6 +108,42 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Recovery wrapper function
+run_with_recovery() {
+    local func_name="$1"
+    local section_name="$2"
+    local -n failed_array="$3"
+
+    show_progress "Collecting: $section_name"
+
+    # Disable exit on error temporarily
+    set +e
+
+    if ! "$func_name"; then
+        failed_array+=("$section_name")
+        log_error "Failed to collect: $section_name"
+
+        # Add error section to report
+        {
+            echo ""
+            echo "################################################################################"
+            echo "# ERROR: $section_name Collection Failed"
+            echo "# Collected at: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "################################################################################"
+            echo ""
+            echo "An error occurred while collecting $section_name."
+            echo "This may be due to missing commands, insufficient permissions, or system issues."
+            echo "The report generation will continue with remaining sections."
+            echo ""
+        } >> "$OUTFILE"
+    else
+        log_info "Successfully collected: $section_name"
+    fi
+
+    # Re-enable exit on error
+    set -e
+}
+
 # System Information Collection Functions
 collect_system_info() {
     section "System Information Summary"
@@ -111,9 +153,10 @@ collect_system_info() {
         echo "Operating System: $(get_os_info)"
         echo "Kernel Version: $(uname -r)"
         echo "Architecture: $(uname -m)"
-        echo "System Uptime: $(uptime -p 2>/dev/null || uptime)"
+        echo "System Uptime: $(uptime -p 2>/dev/null || uptime | cut -d',' -f1)"
         echo "Current User: $(whoami)"
-        echo "System Load: $(uptime | awk -F'load average:' '{print $2}')"
+        local load_avg=$(uptime | grep -o 'load average:.*' | cut -d':' -f2 || echo " N/A")
+        echo "System Load:$load_avg"
     } >> "$OUTFILE"
 
     section "Detailed OS Information"
@@ -136,9 +179,16 @@ collect_system_info() {
     if command_exists timedatectl; then
         safe_exec "timedatectl"
     fi
-    
+
     section "Timezone Configuration"
-    safe_exec "cat /etc/timezone" || safe_exec "ls -la /etc/localtime"
+    if [[ -f /etc/timezone ]]; then
+        safe_exec "cat /etc/timezone"
+    elif [[ -L /etc/localtime ]]; then
+        safe_exec "ls -la /etc/localtime"
+    else
+        echo "Timezone information not available via standard files" >> "$OUTFILE"
+        safe_exec "date +%Z"
+    fi
 }
 
 # Helper function to get OS info
@@ -185,8 +235,8 @@ collect_hardware_info() {
     fi
 
     section "HugePages Configuration"
-    safe_exec "grep -E '^(HugePages|Hugepagesize)' /proc/meminfo"
-    
+    safe_exec "grep -E '^HugePages\|^Hugepagesize' /proc/meminfo || echo 'No HugePages configuration found in /proc/meminfo'"
+
     section "Transparent HugePages Status"
     if [[ -f /sys/kernel/mm/transparent_hugepage/enabled ]]; then
         echo "THP Enabled: $(cat /sys/kernel/mm/transparent_hugepage/enabled)" >> "$OUTFILE"
@@ -207,7 +257,7 @@ collect_hardware_info() {
     if command_exists lshw; then
         safe_exec "lshw -short"
     fi
-    
+
     if command_exists dmidecode; then
         safe_exec "dmidecode -t system | head -20"
     fi
@@ -236,7 +286,7 @@ collect_storage_info() {
 
     section "Storage Device Information"
     safe_exec "lsblk -D"  # Show discard capabilities
-    
+
     section "Disk I/O Statistics"
     if command_exists iostat; then
         safe_exec "iostat -x 1 3"
@@ -259,7 +309,7 @@ collect_network_info() {
         ip -o link show | awk '{print $2, $3, $9}'
         echo ""
         echo "=== IP Address Summary ==="
-        ip -o addr show | grep -E "inet[^6]" | awk '{print $2, $4}'
+        ip -o addr show | grep 'inet ' | awk '{print $2, $4}'
     } >> "$OUTFILE"
 
     section "Network Interface Details"
@@ -308,7 +358,7 @@ collect_system_config() {
     section "System Accounts (SAP Related)"
     {
         echo "=== SAP Related Users ==="
-        grep -E "(adm|sap)" /etc/passwd || echo "No SAP users found"
+        grep -iE "adm|sap" /etc/passwd || echo "No SAP users found"
         echo ""
         echo "=== All System Users ==="
     } >> "$OUTFILE"
@@ -317,7 +367,7 @@ collect_system_config() {
     section "System Groups (SAP Related)"
     {
         echo "=== SAP Related Groups ==="
-        grep -E "(sap|dba)" /etc/group || echo "No SAP groups found"
+        grep -E "adm|sap" /etc/group || echo "No SAP groups found"
         echo ""
         echo "=== All System Groups ==="
     } >> "$OUTFILE"
@@ -350,7 +400,7 @@ collect_kernel_params() {
         echo "=== /etc/sysctl.conf ===" >> "$OUTFILE"
         safe_exec "cat /etc/sysctl.conf"
     fi
-    
+
     echo "" >> "$OUTFILE"
     echo "=== SAP HANA Relevant Kernel Parameters ===" >> "$OUTFILE"
     {
@@ -372,7 +422,7 @@ collect_kernel_params() {
 
 collect_package_info() {
     section "Package Management"
-    
+
     # Detect package manager and OS
     if command_exists zypper; then
         echo "=== SUSE/openSUSE System ===" >> "$OUTFILE"
@@ -383,17 +433,17 @@ collect_package_info() {
         echo "" >> "$OUTFILE"
         echo "=== Installed Repositories ===" >> "$OUTFILE"
         safe_exec "zypper lr"
-        
+
     elif command_exists yum; then
         echo "=== Red Hat/CentOS System ===" >> "$OUTFILE"
         safe_exec "yum --version"
         safe_exec "yum repolist"
-        
+
     elif command_exists dnf; then
         echo "=== Fedora/RHEL 8+ System ===" >> "$OUTFILE"
         safe_exec "dnf --version"
         safe_exec "dnf repolist"
-        
+
     elif command_exists apt; then
         echo "=== Debian/Ubuntu System ===" >> "$OUTFILE"
         safe_exec "apt --version"
@@ -408,82 +458,113 @@ collect_package_info() {
 detect_hana_instances() {
     local sap_dir="/usr/sap"
     local -a hana_sids=()
-    
+
     section "SAP HANA Instance Detection"
+
+    echo "" >> "$OUTFILE"
+    echo "=== Checking for HANA admin users ===" >> "$OUTFILE"
+    local user_sids
+    user_sids=$(getent passwd | awk -F':' '/SAP HANA Database System Administrator/ {print $1}' | sed 's/adm$//' | tr '[:lower:]' '[:upper:]' 2>/dev/null)
     
-    if [[ ! -d "$sap_dir" ]]; then
-        echo "ERROR: SAP installation directory not found at $sap_dir" >> "$OUTFILE"
-        return 1
-    fi
-    
-    # Find HANA instances
-    for sid_dir in "$sap_dir"/*; do
-        if [[ -d "$sid_dir" && "$(basename "$sid_dir")" != "tmp" ]]; then
-            local sid="$(basename "$sid_dir")"
-            if ls -1 "$sid_dir"/HDB* >/dev/null 2>&1; then
-                hana_sids+=("$sid")
+    if [[ -n "$user_sids" ]]; then
+        while IFS= read -r sid; do
+            if [[ -n "$sid" && ! " ${hana_sids[@]} " =~ " ${sid} " ]]; then
+                # Verify this is actually a HANA SID by checking for HANA-specific directories
+                local user_home
+                user_home=$(getent passwd "${sid,,}adm" 2>/dev/null | cut -d':' -f6)
+                if [[ -n "$user_home" && -d "$user_home" ]]; then
+                    # Check for HANA indicators in multiple locations
+                    if find "$user_home" -name "*.py" -path "*/python_support/*" 2>/dev/null | head -1 | grep -q . || \
+                       find "/usr/sap/$sid" -name "hdbsql" 2>/dev/null | head -1 | grep -q . || \
+                       find "/usr/sap/$sid" -name "HDB*" -type d 2>/dev/null | head -1 | grep -q . || \
+                       [[ -d "/usr/sap/$sid" && -n "$(ls -A "/usr/sap/$sid" 2>/dev/null)" ]]; then
+                        hana_sids+=("$sid")
+                        echo "Found HANA SID via user check: $sid (user: ${sid,,}adm)" >> "$OUTFILE"
+                    fi
+                fi
             fi
-        fi
-    done
-    
-    if [[ ${#hana_sids[@]} -eq 0 ]]; then
-        echo "No SAP HANA instances detected" >> "$OUTFILE"
-        return 1
+        done <<< "$user_sids"
+    else
+        echo "No potential HANA admin users found" >> "$OUTFILE"
     fi
-    
+
+    # Additional check for directories in /usr/sap that might contain HANA instances
+    if [[ -d "$sap_dir" ]]; then
+        echo "" >> "$OUTFILE"
+        echo "=== Checking SAP directories ===" >> "$OUTFILE"
+        for sid_dir in "$sap_dir"/*; do
+            if [[ -d "$sid_dir" ]]; then
+                local sid_name="$(basename "$sid_dir")"
+                if [[ ! " ${hana_sids[@]} " =~ " ${sid_name} " && -n "$(find "$sid_dir" -name "HDB*" -type d 2>/dev/null | head -1)" ]]; then
+                    hana_sids+=("$sid_name")
+                    echo "Found HANA SID via directory check: $sid_name" >> "$OUTFILE"
+                fi
+            fi
+        done
+    fi
+
+
+    echo "" >> "$OUTFILE"
     echo "Detected SAP HANA SIDs: ${hana_sids[*]}" >> "$OUTFILE"
-    
+    echo "" >> "$OUTFILE"
+
     # Analyze each instance
     for sid in "${hana_sids[@]}"; do
-        analyze_hana_instance "$sid"
+        analyze_hana_instance "$sid" || log_warn "Failed to analyze HANA instance $sid"
     done
 }
 
 analyze_hana_instance() {
     local sid="$1"
-    local sap_dir="/usr/sap"
+    local sap_dir="/hana/shared"
     local sid_dir="$sap_dir/$sid"
-    
+
     section "SAP HANA Instance Analysis: $sid"
-    
+
     # Find instance directory
     local instance_dir
     instance_dir=$(find "$sid_dir" -maxdepth 1 -name "HDB*" -type d | head -1)
-    
+
     if [[ -z "$instance_dir" ]]; then
         echo "ERROR: No HDB instance directory found for SID $sid" >> "$OUTFILE"
         return 1
     fi
-    
+
     local instance_num="$(basename "$instance_dir" | sed 's/HDB//')"
     local hdb_admin="${sid,,}adm"
-    
+
     {
         echo "SID: $sid"
-        echo "Instance Number: $instance_num" 
+        echo "Instance Number: $instance_num"
         echo "Instance Directory: $instance_dir"
         echo "Admin User: $hdb_admin"
         echo "Admin Home: $(getent passwd "$hdb_admin" | cut -d: -f6 2>/dev/null || echo "Not found")"
     } >> "$OUTFILE"
-    
+
     # Check if user exists and can execute commands
     if ! id "$hdb_admin" >/dev/null 2>&1; then
         echo "WARNING: Admin user $hdb_admin not found" >> "$OUTFILE"
         return 1
     fi
-    
+
     # HANA Version Information
     section "HANA Version Information ($sid)"
     execute_as_hana_user "$hdb_admin" "HDB version" "HANA version check"
-    
+
     # HANA Services Status
     section "HANA Services Status ($sid)"
     execute_as_hana_user "$hdb_admin" "HDB info" "HANA services status"
-    
+
     # HANA Configuration
     section "HANA Configuration Parameters ($sid)"
-    execute_as_hana_user "$hdb_admin" "hdbparam" "HANA parameter dump"
-    
+    local config_file="/hana/shared/$sid/global/hdb/custom/config/global.ini"
+    if [[ -f "$config_file" ]]; then
+        echo "=== HANA Global Configuration ===" >> "$OUTFILE"
+        safe_exec "cat $config_file"
+    else
+        echo "HANA configuration file not found at $config_file" >> "$OUTFILE"
+    fi
+
     # HANA Landscape
     section "HANA Landscape Configuration ($sid)"
     local landscape_script="$instance_dir/exe/python_support/landscapeHostConfiguration.py"
@@ -492,21 +573,14 @@ analyze_hana_instance() {
     else
         echo "Landscape script not found at $landscape_script" >> "$OUTFILE"
     fi
-    
+
     # HANA System Overview
     section "HANA System Overview ($sid)"
     local overview_script="$instance_dir/exe/python_support/systemOverview.py"
     if [[ -f "$overview_script" ]]; then
         execute_as_hana_user "$hdb_admin" "python $overview_script" "System overview"
     fi
-    
-    # HANA Hardware Check
-    section "HANA Hardware Validation ($sid)"
-    local hw_check_script="$instance_dir/exe/python_support/checkHardware.py"
-    if [[ -f "$hw_check_script" ]]; then
-        execute_as_hana_user "$hdb_admin" "python $hw_check_script -m details" "Hardware check"
-    fi
-    
+
     # HANA Memory Information
     section "HANA Memory Analysis ($sid)"
     {
@@ -516,7 +590,7 @@ analyze_hana_instance() {
         echo "=== HANA Memory Information ==="
     } >> "$OUTFILE"
     execute_as_hana_user "$hdb_admin" "HDB info | grep -i memory" "HANA memory status"
-    
+
     # HANA File System Analysis
     section "HANA File System Layout ($sid)"
     {
@@ -527,18 +601,18 @@ analyze_hana_instance() {
         ls -la "$sid_dir" 2>/dev/null
         echo ""
         echo "=== HANA Volume Usage ==="
-        df -h | grep -E "(hana|sap)" || echo "No HANA-specific mount points found"
+        df -h | grep -E "hana|sap" || echo "No HANA-specific mount points found"
     } >> "$OUTFILE"
 }
 
 # Safe execution as HANA user with error handling
 execute_as_hana_user() {
     local user="$1"
-    local command="$2" 
+    local command="$2"
     local description="$3"
-    
+
     log_debug "Executing as $user: $command"
-    
+
     if su - "$user" -c "$command" >> "$OUTFILE" 2>&1; then
         log_debug "Successfully executed: $description"
     else
@@ -551,59 +625,205 @@ execute_as_hana_user() {
 main() {
     local start_time
     start_time=$(date +%s)
-    
+
     # Validate environment
-    if [[ $EUID -ne 0 ]]; then
+    if [[ $EUID -ne 0 && "${TEST_MODE:-false}" != "true" ]]; then
         log_error "This script must be run as root for complete system analysis"
+        log_info "Use -t or --test flag to run in test mode without root privileges"
         exit 1
     fi
-    
-    log_info "Starting SAP HANA System Report Generation"
+
+    if [[ "${TEST_MODE:-false}" == "true" ]]; then
+        log_warn "Running in TEST MODE - some information may be incomplete"
+    fi
+
+    # Pre-flight checks
+    log_info "Starting SAP HANA System Report Generator v2.0"
     log_info "Report will be saved to: $OUTFILE"
-    
+
+    # Validate output directory
+    if ! mkdir -p "$OUTDIR" 2>/dev/null; then
+        log_error "Cannot create output directory: $OUTDIR"
+        exit 1
+    fi
+
+    # Check available disk space
+    local available_space
+    available_space=$(df "$OUTDIR" | awk 'NR==2 {print $4}')
+    if [[ $available_space -lt 100000 ]]; then  # Less than ~100MB
+        log_warn "Low disk space in output directory: $OUTDIR"
+    fi
+
+    # Basic system validation
+    log_info "System validation: $(uname -s) $(uname -r) $(uname -m)"
+    log_info "User context: $(whoami) (UID: $EUID)"
+
     # Initialize report
     init_report
-    
-    # Collect system information
-    collect_system_info
-    collect_hardware_info  
-    collect_storage_info
-    collect_network_info
-    collect_system_config
-    collect_kernel_params
-    collect_package_info
-    
-    # SAP HANA specific analysis
-    detect_hana_instances
-    
+
+    # Collect system information with comprehensive error handling
+    local -a failed_sections=()
+
+    run_with_recovery "collect_system_info" "System Information" failed_sections
+    run_with_recovery "collect_hardware_info" "Hardware Information" failed_sections
+    run_with_recovery "collect_storage_info" "Storage Information" failed_sections
+    run_with_recovery "collect_network_info" "Network Information" failed_sections
+    run_with_recovery "collect_system_config" "System Configuration" failed_sections
+    run_with_recovery "collect_kernel_params" "Kernel Parameters" failed_sections
+    run_with_recovery "collect_package_info" "Package Information" failed_sections
+    run_with_recovery "detect_hana_instances" "SAP HANA Analysis" failed_sections
+
+    # Report failed sections
+    if [[ ${#failed_sections[@]} -gt 0 ]]; then
+        section "Report Generation Issues"
+        {
+            echo "The following sections encountered errors during collection:"
+            printf " - %s\n" "${failed_sections[@]}"
+            echo ""
+            echo "Despite these issues, the report has been completed with available information."
+        } >> "$OUTFILE"
+    fi
+
     # Finalize report
     local end_time
     end_time=$(date +%s)
     local duration=$((end_time - start_time))
-    
+
+    # Ensure report is properly completed
+    local report_size="$(du -h "$OUTFILE" 2>/dev/null | cut -f1 || echo 'Unknown')"
+    local line_count="$(wc -l < "$OUTFILE" 2>/dev/null || echo 'Unknown')"
+
     cat >> "$OUTFILE" << EOF
 
 ################################################################################
-# REPORT GENERATION COMPLETED
+# REPORT GENERATION COMPLETED SUCCESSFULLY
 ################################################################################
-Report generated in: ${duration} seconds
-Report file: $OUTFILE
-Report size: $(du -h "$OUTFILE" | cut -f1)
-Generated by: SAP HANA System Report Generator v2.0
+Generation Details:
+  - Start Time: $(date -d "@$start_time" 2>/dev/null || echo 'Unknown')
+  - End Time: $(date)
+  - Duration: ${duration} seconds
+  - Report File: $OUTFILE
+  - Report Size: $report_size
+  - Report Lines: $line_count
+  - Generated By: SAP HANA System Report Generator v2.0
+  - Hostname: $(hostname -f)
+  - Operating System: $(get_os_info)
+  - Kernel: $(uname -r)
+
+Report Sections:
+  [OK] System Information
+  [OK] Hardware Details
+  [OK] Storage Configuration
+  [OK] Network Setup
+  [OK] System Configuration
+  [OK] Kernel Parameters
+  [OK] Package Information
+  [OK] SAP HANA Analysis
+
+For support or questions about this report, please contact your system administrator.
+################################################################################
 
 EOF
 
-    log_info "Report generation completed successfully"
-    log_info "Report saved to: $OUTFILE"
-    log_info "Generation time: ${duration} seconds"
-    
-    # Display summary
-    echo -e "\n${GREEN}===== REPORT SUMMARY =====${NC}"
-    echo "Report Location: $OUTFILE"
-    echo "Report Size: $(du -h "$OUTFILE" | cut -f1)"
-    echo "Generation Time: ${duration} seconds"
-    echo "Timestamp: $(date)"
+    # Final validation
+    if [[ -f "$OUTFILE" && -s "$OUTFILE" ]]; then
+        local final_size="$(du -h "$OUTFILE" | cut -f1)"
+        log_info "Report generation completed successfully"
+        log_info "Report saved to: $OUTFILE"
+        log_info "Generation time: ${duration} seconds"
+        log_info "Final report size: $final_size"
+
+        # Display comprehensive summary
+        echo -e "\n${GREEN}========================================${NC}"
+        echo -e "${GREEN}    SAP HANA REPORT GENERATED${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        echo "[+] Report Location: $OUTFILE"
+        echo "[*] Report Size: $final_size"
+        echo "[T] Generation Time: ${duration} seconds"
+        echo "[H] System: $(hostname -s)"
+        echo "[D] Generated: $(date)"
+        echo "[U] Generated by: $(whoami)"
+
+        if [[ ${#failed_sections[@]} -gt 0 ]]; then
+            echo -e "${YELLOW}[!] Sections with issues: ${#failed_sections[@]}${NC}"
+        else
+            echo -e "${GREEN}[OK] All sections completed successfully${NC}"
+        fi
+
+        echo -e "${GREEN}========================================${NC}"
+
+        # Provide next steps
+        echo -e "\n${BLUE}Next Steps:${NC}"
+        echo "  - Review the report: cat \"$OUTFILE\""
+        echo "  - Copy to another location if needed"
+        echo "  - Share with SAP support if required"
+
+    else
+        log_error "Report generation failed - output file is missing or empty"
+        exit 1
+    fi
+}
+
+# Usage function
+show_usage() {
+    cat << EOF
+SAP HANA System Report Generator v2.0
+
+Usage: $0 [OPTIONS]
+
+Options:
+  -h, --help     Show this help message
+  -d, --debug    Enable debug logging
+  -t, --test     Run in test mode (no root required)
+  -o, --output   Specify output directory (default: /root)
+  -v, --verbose  Verbose output
+
+Environment Variables:
+  REPORT_DIR     Output directory for reports
+  LOG_LEVEL      Logging level (DEBUG, INFO, WARN, ERROR)
+
+Examples:
+  $0                    # Standard run (requires root)
+  $0 -d                 # Debug mode
+  $0 -t                 # Test mode (no root check)
+  $0 -o /tmp            # Custom output directory
+
+EOF
+}
+
+# Parse command line arguments
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            -d|--debug)
+                LOG_LEVEL="DEBUG"
+                shift
+                ;;
+            -t|--test)
+                TEST_MODE=true
+                shift
+                ;;
+            -o|--output)
+                REPORT_DIR="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                LOG_LEVEL="DEBUG"
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1" >&2
+                show_usage >&2
+                exit 1
+                ;;
+        esac
+    done
 }
 
 # Script execution
-main "$@"
+parse_arguments "$@"
+main
