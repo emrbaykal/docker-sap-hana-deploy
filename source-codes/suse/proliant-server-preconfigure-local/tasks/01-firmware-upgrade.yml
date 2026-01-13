@@ -103,7 +103,7 @@
       delegate_to: localhost
       register: server_state
       until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
-      retries: 60  # Maximum number of retries
+      retries: 120  # Maximum number of retries
       delay: 10  # Delay between retries (seconds)
 
     - debug:
@@ -145,7 +145,7 @@
       delegate_to: localhost
       register: server_state
       until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPost"
-      retries: 180  # Maximum number of retries
+      retries: 360  # Maximum number of retries
       delay: 10  # Delay between retries (seconds)
 
     - debug:
@@ -166,11 +166,29 @@
       delegate_to: localhost
       register: server_state
       until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
-      retries: 360  # Maximum number of retries
+      retries: 180  # Maximum number of retries
       delay: 10  # Delay between retries (seconds)
 
     - debug:
         msg: "Proliant Server Booted Successfully..."
+
+    - name: Check If CD-ROM Is Mounted
+      uri:
+        url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Managers/1/VirtualMedia/2"
+        method: GET
+        return_content: yes
+        body: ""
+        body_format: json
+        validate_certs: no
+        user: "{{ server_hardware_username }}"
+        password: "{{ server_hardware_password }}"
+        force_basic_auth: yes
+        status_code: 200
+      delegate_to: localhost
+      register: cdrom_status
+
+    - debug:
+        msg: "CD-ROM Status - Inserted: {{ cdrom_status.json.Inserted }}, Image: {{ cdrom_status.json.Image | default('None') }}, ImageName: {{ cdrom_status.json.ImageName | default('None') }}"
 
     - name: ILO REST POST Eject Firmware ISO
       uri:
@@ -185,3 +203,12 @@
         force_basic_auth: yes
         status_code: 200
       delegate_to: localhost
+      when: cdrom_status.json.Inserted | bool
+
+    - debug:
+        msg: "CD-ROM Has Been Ejected Successfully"
+      when: cdrom_status.json.Inserted | bool
+
+    - debug:
+        msg: "CD-ROM Was Not Mounted, Skipping Eject"
+      when: not cdrom_status.json.Inserted | bool
