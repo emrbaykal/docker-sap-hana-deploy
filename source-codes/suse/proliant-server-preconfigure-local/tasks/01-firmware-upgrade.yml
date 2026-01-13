@@ -166,7 +166,7 @@
       delegate_to: localhost
       register: server_state
       until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
-      retries: 120  # Maximum number of retries
+      retries: 360  # Maximum number of retries
       delay: 10  # Delay between retries (seconds)
 
     - debug:
@@ -177,7 +177,7 @@
         url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Managers/1/VirtualMedia/2/Actions/VirtualMedia.EjectMedia"
         method: POST
         return_content: yes
-        body: "{}"
+        body: ""
         body_format: json
         validate_certs: no
         user: "{{ server_hardware_username }}"
