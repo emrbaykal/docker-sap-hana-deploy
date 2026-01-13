@@ -1,5 +1,33 @@
 ---
 
+- name: ILO REST POST Mount Firmware ISO
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Managers/1/VirtualMedia/2/Actions/VirtualMedia.InsertMedia"
+    method: POST
+    return_content: yes
+    body: "{\"Image\": \"http://{{ gateway_host_ip }}/media/{{ installation_media }}\",\"WriteProtected\": \"true\", \"Inserted\": \"true\" }"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  delegate_to: localhost
+
+- name: ILO REST Boot Order From ISO
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1"
+    method: PATCH
+    return_content: yes
+    body: "{\"Boot\": {\"BootSourceOverrideTarget\": \"Cd\", \"BootSourceOverrideEnabled\": \"Once\" }}"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
+    password: "{{ server_hardware_password }}"
+    force_basic_auth: yes
+    status_code: 200
+  delegate_to: localhost
+
 - name: Get Server Power Status
   uri:
     url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Chassis?$expand=."
@@ -21,12 +49,12 @@
 - debug:
     msg: "Server Power State is: {{ myvar }}"
 
-- name: Server Powering OFF
+- name: Server Reset If Server Powered On
   uri:
     url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
     method: POST
     return_content: yes
-    body: "{\"ResetType\": \"ForceOff\"}"
+    body: "{\"ResetType\": \"ForceRestart\"}"
     body_format: json
     validate_certs: no
     user: "{{ server_hardware_username }}"
@@ -40,16 +68,26 @@
 - debug:
     var=power.json.error
   when: myvar == "On"
-
-- name: Task to boot a system using an ISO from an HP iLO interface
-  hpilo_boot:
-    host: "{{ server_hardware_ilo_ip }}"
-    login: "{{ server_hardware_username }}"
+   
+- name: Server Power On If Server Powered Off
+  uri:
+    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
+    method: POST
+    return_content: yes
+    body: "{\"ResetType\": \"On\"}"
+    body_format: json
+    validate_certs: no
+    user: "{{ server_hardware_username }}"
     password: "{{ server_hardware_password }}"
-    media: cdrom
-    image: http://{{ gateway_host_ip }}/media/{{ installation_media }}
-    state: boot_always
+    force_basic_auth: yes
+    status_code: 200
   delegate_to: localhost
+  when: myvar == "Off"
+  register: power
+
+- debug:
+    var=power.json.error
+  when: myvar == "Off"
 
 - name: Proliant Server Boot State
   uri:
