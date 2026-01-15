@@ -1,73 +1,178 @@
 ---
 
-- name: Get Server Power Status
+- name: Set common URI parameters
+  set_fact:
+    ilo_base_url: "https://{{ server_hardware_ilo_ip }}/redfish/v1"
+    ilo_auth:
+      user: "{{ server_hardware_username }}"
+      password: "{{ server_hardware_password }}"
+      force_basic_auth: yes
+      validate_certs: no
+
+
+- name: Get Server Power Status (Before Mount)
   uri:
-    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Chassis?$expand=."
+    url: "{{ ilo_base_url }}/Chassis?$expand=."
     method: GET
     return_content: yes
-    body: ""
-    body_format: json
-    validate_certs: no
-    user: "{{ server_hardware_username }}"
-    password: "{{ server_hardware_password }}"
-    force_basic_auth: yes
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
     status_code: 200
   delegate_to: localhost
-  register: status
+  register: chassis_status
+  changed_when: false
 
-- set_fact:
-    myvar: "{{ status.json.Members[0].PowerState }}"
 
-- debug:
-    msg: "Server Power State is: {{ myvar }}"
+- name: Extract Server Power State
+  set_fact:
+    server_power_state: "{{ chassis_status.json.Members[0].PowerState }}"
 
-- name: Server Powering OFF
+
+- name: Display Server Power State
+  debug:
+    msg: "Server Power State: {{ server_power_state }}"
+
+- name: Power Off Server (If Currently On)
   uri:
-    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/Systems/1/Actions/ComputerSystem.Reset"
+    url: "{{ ilo_base_url }}/Systems/1/Actions/ComputerSystem.Reset"
     method: POST
     return_content: yes
-    body: "{\"ResetType\": \"ForceOff\"}"
     body_format: json
-    validate_certs: no
-    user: "{{ server_hardware_username }}"
-    password: "{{ server_hardware_password }}"
-    force_basic_auth: yes
+    body:
+      ResetType: "ForceOff"
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
     status_code: 200
   delegate_to: localhost
-  when: myvar == "On"
-  register: power
+  when: server_power_state == "On"
+  register: poweroff_result
+  changed_when: poweroff_result.status == 200
 
-- debug:
-    var=power.json.error
-  when: myvar == "On"
-
-- name: Task to boot a system using an ISO from an HP iLO interface
-  hpilo_boot:
-    host: "{{ server_hardware_ilo_ip }}"
-    login: "{{ server_hardware_username }}"
-    password: "{{ server_hardware_password }}"
-    media: cdrom
-    image: http://{{ gateway_host_ip }}/media/{{ installation_media }}
-    state: boot_always
+- name: Wait for Server to Fully Power Off
+  uri:
+    url: "{{ ilo_base_url }}/Chassis/1"
+    method: GET
+    return_content: yes
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
+    status_code: 200
   delegate_to: localhost
+  register: poweroff_state
+  until: poweroff_state.json.PowerState == "Off"
+  retries: 30
+  delay: 5
+  changed_when: false
+  when: server_power_state == "On"
+
+- name: Confirm Server Powered Off
+  debug:
+    msg: "Server is now powered off and ready for configuration."
+  when: server_power_state == "On"
+
+- name: Mount Operating System ISO to Virtual Media
+  uri:
+    url: "{{ ilo_base_url }}/Managers/1/VirtualMedia/2/Actions/VirtualMedia.InsertMedia"
+    method: POST
+    return_content: yes
+    body_format: json
+    body:
+      Image: "http://{{ gateway_host_ip }}/media/{{ installation_media }}"
+      Inserted: true
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
+    status_code: 200
+  delegate_to: localhost
+  register: mount_result
+  changed_when: mount_result.status == 200
+  failed_when: mount_result.status != 200
+
+- name: Wait a Few Seconds for Virtual Media to Stabilize
+  pause:
+    seconds: 5
+
+- name: Try BootOnNextServerReset (May Fail - Ignore)
+  uri:
+    url: "{{ ilo_base_url }}/Managers/1/VirtualMedia/2"
+    method: PATCH
+    return_content: yes
+    body_format: json
+    body:
+      Oem:
+        Hpe:
+          BootOnNextServerReset: true
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
+    status_code: 200
+  delegate_to: localhost
+  register: boot_enable_result
+  changed_when: boot_enable_result.status == 200
+  failed_when: false
+
+- name: Wait for Boot Configuration to Take Effect
+  pause:
+    seconds: 5
+
+- block:
+    - name: Power On Server to Boot from OS ISO
+      uri:
+        url: "{{ ilo_base_url }}/Systems/1/Actions/ComputerSystem.Reset"
+        method: POST
+        return_content: yes
+        body_format: json
+        body:
+          ResetType: "On"
+        user: "{{ ilo_auth.user }}"
+        password: "{{ ilo_auth.password }}"
+        force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+        validate_certs: "{{ ilo_auth.validate_certs }}"
+        status_code: 200
+      delegate_to: localhost
+      register: poweron_result
+      changed_when: poweron_result.status == 200
+
+    - name: Display Power On Result
+      debug:
+        msg: "Server power on initiated to boot from OS ISO. Error details (if any): {{ poweron_result.json.error | default('No errors') }}"
+
+  rescue:
+    - name: Handle Power On Failure
+      debug:
+        msg: "Failed to power on server. Please check iLO connectivity and credentials."
+      failed_when: true
 
 - name: Proliant Server Boot State
   uri:
-    url: "https://{{ server_hardware_ilo_ip }}/redfish/v1/systems/1"
+    url: "{{ ilo_base_url }}/systems/1"
     method: GET
     return_content: yes
-    body: ""
-    body_format: json
-    validate_certs: no
-    user: "{{ server_hardware_username }}"
-    password: "{{ server_hardware_password }}"
-    force_basic_auth: yes
+    user: "{{ ilo_auth.user }}"
+    password: "{{ ilo_auth.password }}"
+    force_basic_auth: "{{ ilo_auth.force_basic_auth }}"
+    validate_certs: "{{ ilo_auth.validate_certs }}"
     status_code: 200
   delegate_to: localhost
-  register: server_state
-  until: server_state.status == 200 and server_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
-  retries: 60  # Maximum number of retries
-  delay: 10  # Delay between retries (seconds)
+  register: boot_state
+  until: >
+    boot_state.status == 200 and
+    boot_state.json.Oem.Hpe.PostState == "InPostDiscoveryComplete"
+  retries: 60
+  delay: 10
+  changed_when: false
 
-- debug:
-    msg: "Proliant Server Booted Successfully..."
+- name: Confirm Server Boot Success
+  debug:
+    msg: "Proliant Server booted successfully from OS DVD. POST State: {{ boot_state.json.Oem.Hpe.PostState }}"
+
+
+
+
